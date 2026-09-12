@@ -1,0 +1,52 @@
+[
+  {
+    "id": "day0-headshot",
+    "title": "Capture: Day 0 headshot",
+    "preview": "One clear photo, natural light, plain background. Feeds the founding post on Instagram + Facebook — do this one first.",
+    "category": "IG + FB",
+    "url": "https://claude.ai/code/artifact/b01e73d2-fc67-41ad-af96-c16eb2166cf6#post-day0",
+    "addedAt": "2026-09-10T15:00:00Z",
+    "done": false,
+    "deleted": false
+  },
+  {
+    "id": "pnf-clip",
+    "title": "Capture: PNF stretch clip",
+    "preview": "15-20 sec clip of one assisted PNF stretch, plus a close-up of the hand contact. Feeds next Wednesday's (9/16) Reel — not this past Wednesday.",
+    "category": "Reel",
+    "url": "https://claude.ai/code/artifact/b01e73d2-fc67-41ad-af96-c16eb2166cf6#post-wed",
+    "addedAt": "2026-09-10T15:00:00Z",
+    "done": false,
+    "deleted": false
+  },
+  {
+    "id": "hip-hinge-photos",
+    "title": "Capture: hip-hinge photos",
+    "preview": "3 photos of the same hip-hinge cue: standing, seated/chair, and floor-supported. Same outfit and background. Feeds Friday's carousel.",
+    "category": "Carousel",
+    "url": "https://claude.ai/code/artifact/b01e73d2-fc67-41ad-af96-c16eb2166cf6#post-fri",
+    "addedAt": "2026-09-10T15:00:00Z",
+    "done": false,
+    "deleted": false
+  },
+  {
+    "id": "pick-business-name",
+    "title": "Decide: business name",
+    "preview": "Decided: Basecamp Bodywork.",
+    "category": "Decision",
+    "url": "https://claude.ai/code/artifact/c5a3de3f-d849-42dc-a4bf-6e428a3d2a3a",
+    "addedAt": "2026-09-10T17:55:00Z",
+    "done": true,
+    "deleted": false
+  },
+  {
+    "id": "pick-identity-direction",
+    "title": "Decide: the actual logo mark",
+    "preview": "Decided: the original Summit Curve — an outline peak with a separate curve underneath, no fill, nothing overlapping, no letters. Pine & Ember colorway. Real export SVGs corrected to match (color, mono, white, wordmark lockup) after an earlier draft wrongly shipped a filled/overlapping variant. Known risk: this composition is close to Quiksilver's mountain-and-wave logo — accepted knowingly.",
+    "category": "Decision",
+    "url": "https://claude.ai/code/artifact/1e1e55dd-a0ae-4443-8ea3-a2c96075522d",
+    "addedAt": "2026-09-11T00:55:00Z",
+    "done": true,
+    "deleted": false
+  }
+]

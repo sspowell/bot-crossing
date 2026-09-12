@@ -6,6 +6,12 @@ dist
 data/*.json
 data/*.tmp
 
+# Business Tasks is the exception: it's hand-authored content (Sherman's actual to-do list),
+# not colony bookkeeping, and it has no other backup or history anywhere. Tracking it gives a
+# real changelog for free — `git log -p data/business-tasks.json` is every edit ever made to
+# it, in order, with a diff. See the "Change history" note in server/harnesses/business-tasks.mjs.
+!data/business-tasks.json
+
 # Per-machine Claude Code permissions — personal paths live in here.
 .claude/settings.local.json
 
