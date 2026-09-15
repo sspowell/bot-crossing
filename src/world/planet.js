@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js'
 import { atlasTexture, hasPart, part } from './kit.js'
 
 /**
@@ -85,10 +86,25 @@ export const PLANETS = {
     scatter: 'tropical',
     companion: { name: 'Daymoon', color: 0xeaeaea, size: 2.6, glow: 0xffffff },
     dust: 0,
+    // Water instead of hills beyond the sand — see `beach` handling in `createTerrain` /
+    // `sampleHeight` below and `src/world/water.js`, which reads `shoreRadius()` and
+    // `WATER_LEVEL` to lay its surface exactly where the sand actually goes under.
+    beach: true,
   },
 }
 
-const GROUND_SIZE = 340
+export const GROUND_SIZE = 340
+/**
+ * How far out the sand gives way to sea, as a function of angle around the colony rather
+ * than a fixed distance — a perfect circle reads as a moat, not a coastline. `water.js`
+ * reproduces this exact curve in GLSL so the shoreline it draws lines up with the terrain
+ * that actually goes underwater; the two must be changed together.
+ */
+export function shoreRadius(angle) {
+  return COLONY_RADIUS + 26 + Math.sin(angle * 3 + 1.7) * 4 + Math.sin(angle * 7 + 0.4) * 2 + Math.sin(angle * 1.4) * 6
+}
+/** Sea level. Comfortably below the flattest beach sand ever gets, so dry ground never floods. */
+export const WATER_LEVEL = -0.4
 /** Everything inside this radius is the buildable colony, and is kept nearly flat. */
 export const COLONY_RADIUS = 46
 const DETAIL_SEGMENTS = { low: 72, medium: 128, high: 190 }
@@ -119,12 +135,23 @@ export function createTerrain(planet, detail, seed = 1337) {
     const z = pos.getZ(i)
     const dist = Math.hypot(x, z)
 
-    // Flat where the colony lives, then hills that ramp in over the next forty metres —
-    // so nothing ever builds on a slope but the horizon still has shape to it.
-    const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
-    const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
-    const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
-    let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
+    let y
+    if (planet.beach) {
+      // Flat sand near the colony, then a slope down into the sea past the coastline —
+      // hills going the other way. `band` is 0 on dry sand and 1 once fully underwater.
+      const shore = shoreRadius(Math.atan2(z, x))
+      const band = THREE.MathUtils.smoothstep(dist, shore - 10, shore + 30)
+      const dune = fbm(noise, x * 0.05, z * 0.05, 3) * 0.5 * 0.22 * planet.roughness
+      const reef = fbm(noise, x * 0.045, z * 0.045, 4) * 1.1
+      y = dune * (1 - band) + band * (-8 + reef)
+    } else {
+      // Flat where the colony lives, then hills that ramp in over the next forty metres —
+      // so nothing ever builds on a slope but the horizon still has shape to it.
+      const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+      const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
+      const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
+      y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
+    }
 
     for (const crater of craters) {
       const d = Math.hypot(x - crater.x, z - crater.z)
@@ -142,6 +169,9 @@ export function createTerrain(planet, detail, seed = 1337) {
     c.copy(low).lerp(high, shade)
     const speck = fbm(noise, x * 0.55, z * 0.55, 1)
     c.lerp(tint, Math.max(0, speck) * 0.22)
+    // Wet sand darkens as it nears the waterline — the same cue a real beach gives, and the
+    // only thing that sells "underwater" for the strip the water plane doesn't quite cover.
+    if (planet.beach) c.multiplyScalar(1 - THREE.MathUtils.smoothstep(y, 0.1, -0.5) * 0.55)
     // Darken the far field hard so the eye settles on the colony and the hills read as a
     // silhouette rather than as more ground competing with the plots for attention.
     c.multiplyScalar(1 - THREE.MathUtils.smoothstep(dist, COLONY_RADIUS * 0.7, GROUND_SIZE * 0.35) * 0.75)
@@ -172,10 +202,19 @@ export function createTerrain(planet, detail, seed = 1337) {
 
 function sampleHeight(x, z, noise, craters, planet) {
   const dist = Math.hypot(x, z)
-  const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
-  const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
-  const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
-  let y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
+  let y
+  if (planet.beach) {
+    const shore = shoreRadius(Math.atan2(z, x))
+    const band = THREE.MathUtils.smoothstep(dist, shore - 10, shore + 30)
+    const dune = fbm(noise, x * 0.05, z * 0.05, 3) * 0.5 * 0.22 * planet.roughness
+    const reef = fbm(noise, x * 0.045, z * 0.045, 4) * 1.1
+    y = dune * (1 - band) + band * (-8 + reef)
+  } else {
+    const outside = THREE.MathUtils.smoothstep(dist, COLONY_RADIUS - 6, COLONY_RADIUS + 40)
+    const gentle = fbm(noise, x * 0.035, z * 0.035, 3) * 0.5
+    const hills = fbm(noise, x * 0.012, z * 0.012, 4) * 9 + fbm(noise, x * 0.05, z * 0.05, 2) * 1.4
+    y = gentle * planet.roughness * (1 - outside) + hills * outside * planet.roughness
+  }
   for (const crater of craters) {
     const d = Math.hypot(x - crater.x, z - crater.z)
     if (d > crater.r * 1.5) continue
@@ -244,11 +283,54 @@ const SCATTER = {
 }
 
 /**
+ * A low-poly palm: a bowed trunk with six blade fronds fanning out and drooping from the
+ * crown. `lean` bows the trunk and tips the crown the same direction — a few leaning into
+ * the same prevailing wind read as a beach, all of them dead upright reads as a plantation.
+ */
+function buildPalmGeometry(lean = 0) {
+  const trunkH = 1.7
+  const trunk = new THREE.CylinderGeometry(0.045, 0.09, trunkH, 5, 4)
+  const pos = trunk.attributes.position
+  for (let i = 0; i < pos.count; i++) {
+    // Clamped before the fractional power: floating-point round-off can land a hair below the
+    // base, and `Math.pow` of a negative number to a non-integer exponent is NaN in JS.
+    const t = Math.pow(Math.max(0, (pos.getY(i) + trunkH / 2) / trunkH), 1.6) // 0 at the base, 1 at the crown
+    pos.setX(i, pos.getX(i) + t * lean)
+    pos.setZ(i, pos.getZ(i) + t * lean * 0.4)
+  }
+  trunk.translate(0, trunkH / 2, 0)
+  trunk.computeVertexNormals()
+
+  const crown = new THREE.Vector3(lean, trunkH, lean * 0.4)
+  const parts = [trunk]
+  const FRONDS = 6
+  for (let i = 0; i < FRONDS; i++) {
+    const frond = new THREE.ConeGeometry(0.22, 1.3, 3, 1, true)
+    frond.translate(0, 0.65, 0) // base at the origin, tip out along +Y
+    frond.rotateZ(0.14 * (i % 2 ? 1 : -1)) // a little twist so the fan isn't perfectly even
+    frond.rotateX(THREE.MathUtils.degToRad(98)) // swing the tip out to horizontal and drooping
+    frond.rotateY((i / FRONDS) * Math.PI * 2)
+    frond.translate(crown.x, crown.y, crown.z)
+    frond.computeVertexNormals()
+    parts.push(frond)
+  }
+  return BufferGeometryUtils.mergeGeometries(parts, false)
+}
+
+/**
  * The fallback when the kit has not loaded: the primitives this used to be made of. Also the
  * *only* look `scatter: 'tropical'` ever gets — there is no palm in the pack, so that recipe
- * is treated as permanently kit-less rather than pretending an atlas part exists.
+ * is treated as permanently kit-less rather than pretending an atlas part exists, and gets its
+ * own procedural palm instead of the generic blob shapes below.
  */
-function fallbackShapes(isFlora) {
+function fallbackShapes(isFlora, isTropical) {
+  if (isTropical) {
+    return [
+      { geo: buildPalmGeometry(0), sink: 0.05, size: [0.55, 1.0], tint: false, foliage: true, upright: true },
+      { geo: buildPalmGeometry(0.32), sink: 0.05, size: [0.55, 1.0], tint: false, foliage: true, upright: true },
+      { geo: buildPalmGeometry(-0.22), sink: 0.05, size: [0.5, 0.9], tint: false, foliage: true, upright: true },
+    ]
+  }
   const shapes = isFlora
     ? [new THREE.IcosahedronGeometry(0.5, 0), new THREE.ConeGeometry(0.42, 1.5, 5), new THREE.SphereGeometry(0.5, 6, 4)]
     : [
@@ -278,7 +360,7 @@ export function createScatter(planet, density, keepClear = [], seed = 4242) {
 
   const kinds = ready
     ? recipe.map((r) => ({ ...r, geo: part(r.part, 'forest'), weight: r.weight }))
-    : fallbackShapes(isFlora).map((r) => ({ ...r, weight: 1 }))
+    : fallbackShapes(isFlora, isTropical).map((r) => ({ ...r, weight: 1 }))
 
   // One material for the lot. The pack's atlas carries the greens and the greys, and the
   // per-instance colour is a *tint* on top of it — white for anything already the right

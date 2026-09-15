@@ -594,15 +594,59 @@ body {
   border-radius: 2px;
 }
 
-.thread-pop #btn-deselect {
+.thread-pop .tag.moved {
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  color: var(--accent);
+}
+
+.thread-pop .tag.moved svg {
+  width: 10px;
+  height: 10px;
   flex: none;
-  margin: -3px -3px 0 0;
+}
+
+.thread-pop .move-edit {
+  display: block;
+  width: 100%;
+  font: inherit;
+  font-size: 11px;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 3px 7px;
+}
+
+/* Same specificity note as `.side .name-edit[hidden]` above: the block rule outranks the
+   UA `[hidden]` rule, so without this an `input.hidden = true` stops hiding anything. */
+.thread-pop .move-edit[hidden] {
+  display: none;
+}
+
+.thread-pop .move-edit:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.thread-pop #btn-move-thread.active {
+  color: var(--accent);
+}
+
+.thread-pop #btn-deselect,
+.thread-pop #btn-move-thread {
+  flex: none;
+  margin: -3px 0 0;
   width: 28px;
   min-width: 28px;
   height: 28px;
 }
 
-.thread-pop #btn-deselect svg {
+.thread-pop #btn-deselect {
+  margin-right: -3px;
+}
+
+.thread-pop #btn-deselect svg,
+.thread-pop #btn-move-thread svg {
   width: 14px;
   height: 14px;
 }

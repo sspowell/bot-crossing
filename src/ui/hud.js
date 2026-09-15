@@ -45,6 +45,7 @@ const ICON = {
   locate: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><circle cx="12" cy="12" r="7.6"/><path d="M12 1.8v2.6M12 19.6v2.6M1.8 12h2.6M19.6 12h2.6"/></svg>`,
   orbit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10.2" ry="4.6" transform="rotate(-24 12 12)"/><circle cx="21" cy="8.2" r="1.5" fill="currentColor" stroke="none"/></svg>`,
   edit: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>`,
+  move: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5v6a3 3 0 0 0 3 3h13"/><path d="M15 9l5 5-5 5"/></svg>`,
 }
 
 const STAT_DEFS = [
@@ -379,6 +380,17 @@ export class Hud {
       }
     })
     on('.side .name-edit', 'blur', () => this.commitRenameProject(true))
+    on('#btn-move-thread', 'click', () => this.startMoveThread())
+    on('.thread-pop .move-edit', 'keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault()
+        this.commitMoveThread(true)
+      } else if (e.key === 'Escape') {
+        e.preventDefault()
+        this.commitMoveThread(false)
+      }
+    })
+    on('.thread-pop .move-edit', 'blur', () => this.commitMoveThread(true))
     on('#btn-hidden-toggle', 'click', () => this.toggleHiddenList())
     on('#btn-locate', 'click', () => this.actions.focusProject?.(this.project?.name))
     on('#btn-close-project', 'click', () => this.actions.closeProject?.())
@@ -602,6 +614,27 @@ export class Hud {
   }
 
   /**
+   * Reveal the "move to its own area" field on the selected thread's card, pre-filled with
+   * whatever custom area it is already in (blank for a thread still in its own repo's zone).
+   */
+  startMoveThread() {
+    if (!this.selected) return
+    const input = this.$('.thread-pop .move-edit')
+    input.value = this.selected.thread.customZone || ''
+    input.hidden = false
+    input.focus()
+    input.select()
+  }
+
+  /** `save` false (Escape) discards the edit; true (Enter, or losing focus) applies it. */
+  commitMoveThread(save) {
+    const input = this.$('.thread-pop .move-edit')
+    if (input.hidden) return // Enter already committed before blur fired for the same edit.
+    input.hidden = true
+    if (save && this.selected) this.actions.moveThread?.(this.selected.thread.id, input.value)
+  }
+
+  /**
    * The selected thread, shown inside the zone sidebar rather than in a panel of its own —
    * one thread and its repo are the same context, and splitting them across the screen made
    * you look in two places to act on one astronaut.
@@ -610,6 +643,11 @@ export class Hud {
     const card = this.$('.thread-pop')
     // Only ever one accent button in the panel: whichever action is the immediate one.
     this.$('#btn-new-session').classList.toggle('primary', !agent || !thread)
+    // This runs on every poll, not just when the selection actually changes — a live thread
+    // re-selects itself every few seconds as its own data refreshes. Closing the edit field
+    // only when the *identity* changes means a poll landing mid-edit does not close the field
+    // out from under whatever you were about to type.
+    if (this.selected?.thread?.id !== thread?.id) this.$('.thread-pop .move-edit').hidden = true
     if (!agent || !thread) {
       card.classList.remove('on')
       this.selected = null
@@ -625,11 +663,13 @@ export class Hud {
       `<span class="tag"><i class="swatch" style="background:${hex(agent.trim.getHex())}"></i>${escapeHtml(status)}</span>`,
     ]
     // The repo is the panel's own heading now, so the card says what the *thread* is.
+    if (thread.customZone) bits.push(`<span class="tag moved">${ICON.move} ${escapeHtml(thread.customZone)}</span>`)
     if (thread.worktree) bits.push(`<span class="tag">⑂ ${escapeHtml(thread.worktree)}</span>`)
     if (thread.gitBranch) bits.push(`<span class="tag">${escapeHtml(thread.gitBranch)}</span>`)
     if (thread.model) bits.push(`<span class="tag">${escapeHtml(shortModel(thread.model))}</span>`)
     bits.push(`<span>${ago(thread.lastActivityAt)}</span>`)
     meta.innerHTML = bits.join('')
+    this.$('#btn-move-thread').classList.toggle('active', Boolean(thread.customZone))
 
     const pct = Math.round((this.actions.progressFor?.(thread.id) ?? 0) * 100)
     this.$('.thread-pop .progress > i').style.width = `${pct}%`
@@ -1007,7 +1047,9 @@ const TEMPLATE = `
     <div class="info">
       <div class="title"></div>
       <div class="meta"></div>
+      <input class="move-edit" type="text" maxlength="80" placeholder="New area name…" hidden />
     </div>
+    <button class="btn icon ghost" id="btn-move-thread" title="Move this thread to its own area">${ICON.move}</button>
     <button class="btn icon ghost" id="btn-deselect" title="Deselect (Esc)">${ICON.close}</button>
   </div>
   <div class="progress"><i></i></div>

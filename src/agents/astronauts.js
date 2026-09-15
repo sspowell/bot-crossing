@@ -26,7 +26,28 @@ import { attachMatrixAt, decorateSkinned, frameFor } from './crew.js'
  * size these characters render.
  */
 
-const SUIT_TONES = [0xf3f1ec, 0xe8e4dc, 0xf7f4ee, 0xdfe4e8, 0xf1e9df]
+/**
+ * Suit colour is the one thing about an astronaut that is pure identity rather than status —
+ * everything else worn (trim, eye glow) is what a thread is *doing*, picked from `AGENT_LOOK`
+ * below and shared by everyone in the same state. A real palette here, not near-white
+ * variations on the same colour, is what makes a crowd actually read as individuals at a
+ * glance. Picked deterministically from the thread's own id (see `hash()` below) rather than
+ * randomly, so the same thread wears the same suit across a reload.
+ */
+const SUIT_TONES = [
+  0xf2efe6, // chalk white
+  0xd9c9a3, // sand tan
+  0xc9642f, // hazard orange
+  0x3f6e8c, // slate blue
+  0x5c7a4f, // olive drab
+  0x8a3b3b, // brick red
+  0x2f6e6a, // deep teal
+  0xab8a3a, // mustard
+  0x4a4f66, // steel indigo
+  0xb9a6c9, // pale lavender
+  0x6e7b6a, // moss grey
+  0xcf9b6a, // clay
+]
 
 /** Trim + eye colour per behaviour. Eyes are pushed past 1.0 so the bloom pass catches them. */
 const AGENT_LOOK = {

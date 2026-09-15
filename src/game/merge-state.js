@@ -127,6 +127,8 @@ export function mergeState(base, local, remote) {
     hiddenProjects: mergeSet(b.hiddenProjects, l.hiddenProjects, r.hiddenProjects),
     viewedAt: mergeMap(b.viewedAt, l.viewedAt, r.viewedAt),
     projectNames: mergeMap(b.projectNames, l.projectNames, r.projectNames),
+    threadProjects: mergeMap(b.threadProjects, l.threadProjects, r.threadProjects),
+    galaxy: mergeMap(b.galaxy, l.galaxy, r.galaxy),
     settings: l.settings && typeof l.settings === 'object' ? l.settings : r.settings ?? null,
   }
 }

@@ -56,6 +56,7 @@ let state = {
   hiddenProjects: [],
   viewedAt: {},
   projectNames: {},
+  threadProjects: {},
 }
 let threads = []
 /** Last legend built for the bottom bar, kept so the open zone's chip can light up between polls. */
@@ -232,6 +233,28 @@ const actions = {
     applyThreads(threads)
     syncProject()
     hud.toast(trimmed && trimmed !== name ? `Renamed to "${trimmed}"` : `Reset to "${name}"`)
+  },
+
+  /**
+   * Give one thread a zone of its own, independent of whichever repo it actually runs in —
+   * or, with an empty name, fold it back into that real repo's zone. This only ever changes
+   * *grouping*: the thread and the harness session behind it are untouched, so "New
+   * conversation" from the new zone still opens in the thread's real folder, because that
+   * folder is still where it actually lives. See `threadProjects` in `server/api.mjs`.
+   */
+  moveThread: (threadId, projectName) => {
+    const thread = threads.find((t) => t.id === threadId)
+    if (!thread) return
+    const trimmed = String(projectName || '').trim().slice(0, 80)
+    const current = { ...(state.threadProjects || {}) }
+    if (!trimmed) delete current[threadId]
+    else current[threadId] = trimmed
+    state.threadProjects = current
+    queueSave()
+    applyThreads(threads)
+    // Follow it to its new ground rather than leaving the sidebar pointed at the old zone.
+    select(threadId, { fly: true })
+    hud.toast(trimmed ? `Moved to "${trimmed}"` : 'Back in its own repo zone')
   },
 
   copyProjectPath: async () => {
@@ -623,9 +646,27 @@ function applyThreads(list) {
   // A thread you have said you looked at stops counting as unread until it moves on again.
   // Done here rather than in `statusFor` so the card, the badge and the astronaut all agree.
   const viewed = state.viewedAt || {}
+  const threadProjects = state.threadProjects || {}
   threads = list.map((t) => {
+    const patch = {}
     const at = viewed[t.id]
-    return at && t.lastActivityAt <= at ? { ...t, unread: false } : t
+    if (at && t.lastActivityAt <= at) patch.unread = false
+    // A per-thread zone override, applied here so every downstream lookup — grouping,
+    // the legend counts, `pathForProject` — sees one consistent `project` and none of them
+    // need to know the override exists. The harness's own report never changes underneath it.
+    //
+    // `list` is not always fresh off the API: an action handler that just changed
+    // `state.threadProjects` re-runs this on the *already-patched* `threads` array, whose
+    // `.project` may already be an old override rather than the harness's own answer. So the
+    // true value is captured once, on first sight, as `realProject` — every later pass reads
+    // that instead of `t.project`, or clearing an override would have nothing to revert to.
+    const real = t.realProject ?? t.project
+    const moved = threadProjects[t.id]
+    const project = moved || real
+    if (project !== t.project) patch.project = project
+    if (real !== t.realProject) patch.realProject = real
+    if ((moved || undefined) !== t.customZone) patch.customZone = moved || undefined
+    return Object.keys(patch).length ? { ...t, ...patch } : t
   })
   list = threads
   const archivedSet = new Set(state.archived)

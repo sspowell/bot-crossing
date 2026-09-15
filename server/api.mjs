@@ -9,6 +9,7 @@ import {
   harnessStatus,
   newSession as harnessNewSession,
   openThread as harnessOpenThread,
+  completeThread as harnessCompleteThread,
   scanThreads,
 } from './scan.mjs'
 
@@ -59,6 +60,14 @@ const emptyState = () => ({
   // Display-name overrides, keyed by the real project name. Cosmetic only — every lookup
   // that actually finds a repo's threads still keys on the real name, never this one.
   projectNames: {},
+  // Which zone a *thread* is grouped into, keyed by thread id, overriding its harness-reported
+  // project. Unlike `projectNames` this is not cosmetic — it is the actual grouping key a
+  // thread's astronaut is placed under, which is how one thread can get a zone of its own
+  // without its harness session ever moving to a different folder.
+  threadProjects: {},
+  // Where things sit in the galaxy view, keyed by node or thought id → [x, y, z]. Only ever
+  // written for something the user has dragged; everything else is placed deterministically.
+  galaxy: {},
   settings: null,
   updatedAt: 0,
 })
@@ -79,6 +88,8 @@ async function readState() {
       hiddenProjects: asArray(raw.hiddenProjects).map(String).filter(Boolean),
       viewedAt: asObject(raw.viewedAt),
       projectNames: asObject(raw.projectNames),
+      threadProjects: asObject(raw.threadProjects),
+      galaxy: asObject(raw.galaxy),
       settings: raw.settings && typeof raw.settings === 'object' ? raw.settings : null,
       updatedAt: Number(raw.updatedAt) || 0,
     }
@@ -115,6 +126,8 @@ async function writeState(next) {
     hiddenProjects: asArray(next.hiddenProjects).map(String).filter(Boolean),
     viewedAt: asObject(next.viewedAt),
     projectNames: asObject(next.projectNames),
+    threadProjects: asObject(next.threadProjects),
+    galaxy: asObject(next.galaxy),
     settings: next.settings && typeof next.settings === 'object' ? next.settings : null,
     updatedAt: Date.now(),
   }
@@ -414,6 +427,12 @@ export async function apiMiddleware(req, res, next) {
       const { harness, ref } = await readJsonBody(req)
       const shown = await present(await harnessOpenThread(harness, ref))
       return send(res, shown.ok ? 200 : 400, shown)
+    }
+
+    if (url.pathname === '/api/complete' && req.method === 'POST') {
+      const { harness, ref } = await readJsonBody(req)
+      const done = await harnessCompleteThread(harness, ref)
+      return send(res, done?.ok ? 200 : 400, done?.ok ? { ok: true } : { ok: false, error: done?.error || 'Could not complete that' })
     }
 
     if ((url.pathname === '/api/new-session' || url.pathname === '/api/reveal') && req.method === 'POST') {

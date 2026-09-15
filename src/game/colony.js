@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { PLANETS, createTerrain, createScatter, terrainHeight } from '../world/planet.js'
+import { createWater, updateWater } from '../world/water.js'
 import { Sky } from '../world/sky.js'
 import {
   Plot,
@@ -105,6 +106,65 @@ export function transcriptProgress(thread) {
   return THREE.MathUtils.clamp((Math.log10(size) - 3) / 3.5, 0.05, 1)
 }
 
+/**
+ * How much a thread's *building* should loom, as opposed to how far along it looks.
+ *
+ * Only "waiting" and "blocked" count — those are the two states that are, in plain terms,
+ * ignoring you rather than the other way around, and blocked starts worse than waiting
+ * because something is actually stuck rather than merely unread. From there it climbs with
+ * plain neglect: a week sitting in that state is enough to reach the top of the scale, so a
+ * thread you noticed and are already acting on never gets there, and one you have genuinely
+ * forgotten about does.
+ *
+ * 0 means "an ordinary building" — everything working, idle, sleeping or just shipped keeps
+ * exactly the look it always had, picked at random from the full catalogue as before.
+ */
+const URGENCY_BASE = { blocked: 1, waiting: 0.6 }
+const URGENCY_NEGLECT_DAYS = 7
+
+export function buildingUrgency(thread, status, now = Date.now()) {
+  // A harness can hint urgency its states can't express — a to-do's own priority, say. It's a
+  // floor, never a ceiling: neglect can still push a building past it.
+  const hinted = THREE.MathUtils.clamp(Number(thread.urgency) || 0, 0, 1)
+  const base = URGENCY_BASE[status]
+  if (!base) return hinted
+  const ageDays = Math.max(0, (now - thread.lastActivityAt) / 86_400_000)
+  const neglect = THREE.MathUtils.clamp(ageDays / URGENCY_NEGLECT_DAYS, 0, 1)
+  // Blended rather than multiplied: a merely-`base`-weighted score caps a "waiting" thread at
+  // 0.6 forever, no matter how old, which never reaches the top tier below — and the whole
+  // point is that neglect alone gets you there eventually. `base` decides the head start and
+  // how fast it climbs, not the ceiling.
+  return Math.max(hinted, THREE.MathUtils.clamp(base * 0.5 + neglect * 0.5, 0, 1))
+}
+
+/**
+ * Which of the ten recipes an urgency score is allowed to grow into. Kept to *subsets* of the
+ * existing catalogue rather than any new geometry: every one of these is already tuned to fit
+ * a plot slot (see `BUILDING_SCALE` in `world/buildings.js`), so "bigger" never risks a
+ * building that clips its neighbours or a nav-grid radius nobody accounted for.
+ *
+ * Ranked by silhouette, not by any number in the pack: `tower` and `antenna` are the only two
+ * that break the skyline, `reactor` and `greenhouse` ring extra parts around themselves for a
+ * wider footprint, and the rest are the compact, single-module recipes.
+ */
+const URGENCY_TIERS = [
+  { max: 0, kinds: null }, // ordinary — full catalogue, exactly as before
+  { max: 0.4, kinds: ['pad', 'silo', 'lab'] },
+  { max: 0.75, kinds: ['habitat', 'workshop', 'solar'] },
+  { max: Infinity, kinds: ['tower', 'antenna', 'reactor', 'greenhouse'] },
+]
+
+function tierFor(urgency) {
+  return URGENCY_TIERS.find((t) => urgency <= t.max)
+}
+
+/** Deterministic per thread, so a re-render never reshuffles which building it grew into. */
+function kindFor(thread, urgency) {
+  const tier = tierFor(urgency)
+  if (!tier.kinds) return null
+  return tier.kinds[hashString(`${thread.id}:kind`) % tier.kinds.length]
+}
+
 export class Colony {
   constructor(scene, settings, camera, renderer) {
     this.scene = scene
@@ -177,10 +237,18 @@ export class Colony {
       this.worldGroup.remove(this.scatterGroup)
       disposeTree(this.scatterGroup)
     }
+    if (this.water) {
+      this.worldGroup.remove(this.water)
+      disposeTree(this.water)
+      this.water = null
+    }
 
     this.terrain = createTerrain(this.planet, this.settings.get('groundDetail'))
     this.worldGroup.add(this.terrain)
     this._buildScatter()
+
+    this.water = createWater(this.planet, this.settings.get('groundDetail'))
+    if (this.water) this.worldGroup.add(this.water)
 
     // The ship has legs, and legs have to reach the ground. Its landing spot is a fixed hex
     // cell, but the height of that spot is the planet's, so it is set here rather than once
@@ -343,7 +411,7 @@ export class Colony {
         if (status === 'waiting' || status === 'blocked' || status === 'working') active.add(plot.id)
         stats.agents++
 
-        const building = this._syncBuilding(thread, plot, i)
+        const building = this._syncBuilding(thread, plot, i, status, now)
         seenBuildings.add(thread.id)
 
         roster.push({
@@ -486,20 +554,21 @@ export class Colony {
     return PLOT_PALETTE[start]
   }
 
-  _syncBuilding(thread, plot, index) {
+  _syncBuilding(thread, plot, index, status, now) {
     let entry = this.buildings.get(thread.id)
     // Whole, always. A building that has finished rising is a building you can see all of.
     const target = 1
+    const kind = kindFor(thread, buildingUrgency(thread, status, now))
 
     if (!entry) {
-      const mesh = createBuilding({ seed: hashString(thread.id), accent: plot.accent })
+      const mesh = createBuilding({ seed: hashString(thread.id), accent: plot.accent, kind })
       const pos = plot.worldSlot(index)
       mesh.position.copy(pos)
       mesh.rotation.y = ((hashString(thread.id) >>> 8) % 360) * (Math.PI / 180)
       // New buildings rise from nothing rather than appearing whole.
       mesh.userData.setProgress(0)
       this.worldGroup.add(mesh)
-      entry = { mesh, plot: plot.id, slot: index, progress: 0, target, retiring: false }
+      entry = { mesh, plot: plot.id, slot: index, progress: 0, target, retiring: false, kind }
       this.buildings.set(thread.id, entry)
     } else {
       // Where this building belongs *now*. Comparing the world position rather than the
@@ -511,6 +580,28 @@ export class Colony {
         entry.plot = plot.id
         entry.slot = index
         entry.mesh.position.copy(want)
+      }
+
+      // Crossed into a different urgency tier since the last poll — rebuilt from the new
+      // recipe, with the same rise-from-nothing reveal a brand-new building gets. `setThreads`
+      // already calls `_rebuildNavigation()` unconditionally once every poll, so a bigger
+      // footprint here is picked up without any extra bookkeeping.
+      if (entry.kind !== kind) {
+        const pos = entry.mesh.position.clone()
+        const rotY = entry.mesh.rotation.y
+        this.worldGroup.remove(entry.mesh)
+        entry.mesh.geometry.dispose()
+        entry.mesh.material.dispose()
+        entry.mesh.customDepthMaterial?.dispose()
+
+        const mesh = createBuilding({ seed: hashString(thread.id), accent: plot.accent, kind })
+        mesh.position.copy(pos)
+        mesh.rotation.y = rotY
+        mesh.userData.setProgress(0)
+        this.worldGroup.add(mesh)
+        entry.mesh = mesh
+        entry.kind = kind
+        entry.progress = 0
       }
     }
 
@@ -733,6 +824,7 @@ export class Colony {
     // One write turns every rotor in the colony.
     buildingUniforms.uTime.value = elapsed
     this.ship.update(dt, elapsed, night)
+    updateWater(this.water, dt, elapsed, this.sky.sunDir, this.sky.sun.color)
 
     this._growBuildings(dt)
     this.astronauts.update(dt, elapsed)
