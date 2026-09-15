@@ -244,6 +244,12 @@ kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 
 }
 .g-toast.show { opacity: 1; transform: translate(-50%, 0); }
 .g-toast.err { border-color: rgba(255, 90, 74, 0.45); }
+.g-toast.has-action { pointer-events: auto; display: flex; align-items: center; gap: 14px; padding-right: 6px; }
+.g-toast-action {
+  border: 0; border-radius: 999px; padding: 5px 12px; cursor: pointer;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: #05060a; background: var(--star);
+}
+.g-toast-action:hover { background: #fff; }
 
 /* ── flight ───────────────────────────────────────────────────────── */
 .flight-mode .g-filters, .flight-mode .g-hint, .flight-mode .g-panel, .flight-mode .g-cursor { opacity: 0; pointer-events: none; transition: opacity 600ms var(--ease); }
@@ -266,6 +272,8 @@ kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 
 .g-flight-keys kbd { margin-right: 2px; }
 .g-flight-row { display: flex; gap: 6px; pointer-events: auto; }
 .g-flight-row .g-chip { border: 1px solid var(--hair); background: var(--glass); backdrop-filter: blur(12px); }
+
+.g-flash { position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
 
 .g-empty { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; z-index: 2; pointer-events: none; }
 .g-empty .g-title { font-size: 34px; }

@@ -1,12 +1,15 @@
 import * as THREE from 'three'
 import { NOISE } from './glsl.js'
+import { buildSamurai, makeEnvironment } from './samurai.js'
 
 /**
  * You, flying: a samurai crossing the systems under his own power.
  *
  * He hovers upright with a slow breath when still, leans flat into a fist-forward dive as he picks
  * up speed, flares gold when you power up, and sits cross-legged in the air beside a world when he
- * lands. The flight is tuned to feel smooth rather than twitchy: every control eases in and out,
+ * lands — after announcing himself with a gathered sphere of energy thrown into the world. When
+ * you resolve a task he's sitting with, he finishes it with an ultimate: a charged beam that
+ * breaks the world apart. The flight is tuned to feel smooth rather than twitchy: every control eases in and out,
  * turning carves the path instead of sliding it, and the camera rides on a spring. Nothing here
  * changes a task — landing only opens its card.
  *
@@ -24,172 +27,50 @@ const UP = new THREE.Vector3(0, 1, 0)
 const CALM = new THREE.Color('#bcd4ff')
 const POWER = new THREE.Color('#ffc34d')
 
-// ── the samurai ───────────────────────────────────────────────────────────────────────
-// Joints are groups; each limb hangs straight down (-y) from its joint, facing -z. Rotating a
-// joint's x swings the limb forward; z swings it out to the side.
-function buildFigure() {
-  const skin = new THREE.MeshStandardMaterial({ color: '#4a2e1f', roughness: 0.55, metalness: 0.02 })
-  const hairMat = new THREE.MeshStandardMaterial({ color: '#0f0c0b', roughness: 0.8 })
-  const kimono = new THREE.MeshStandardMaterial({ color: '#1e2740', roughness: 0.8 })
-  const inner = new THREE.MeshStandardMaterial({ color: '#e9e1d2', roughness: 0.85 })
-  const hakama = new THREE.MeshStandardMaterial({ color: '#232226', roughness: 0.85, side: THREE.DoubleSide })
-  const obi = new THREE.MeshStandardMaterial({ color: '#de5b23', roughness: 0.6, emissive: '#de5b23', emissiveIntensity: 0.18, side: THREE.DoubleSide })
-  const lacquer = new THREE.MeshStandardMaterial({ color: '#141316', roughness: 0.28, metalness: 0.35 })
-  const lacing = new THREE.MeshStandardMaterial({ color: '#b8431a', roughness: 0.6 })
-  const band = new THREE.MeshStandardMaterial({ color: '#f2ede2', roughness: 0.8, side: THREE.DoubleSide })
-  const steel = new THREE.MeshStandardMaterial({ color: '#8d8a84', roughness: 0.3, metalness: 0.85 })
-  const wrap = new THREE.MeshStandardMaterial({ color: '#2a1d14', roughness: 0.7 })
-  const sandal = new THREE.MeshStandardMaterial({ color: '#17140f', roughness: 0.7 })
-
-  const mesh = (geo, mat, parent, [x, y, z] = [0, 0, 0], [rx, ry, rz] = [0, 0, 0], [sx, sy, sz] = [1, 1, 1]) => {
-    const m = new THREE.Mesh(geo, mat)
-    m.position.set(x, y, z)
-    m.rotation.set(rx, ry, rz)
-    m.scale.set(sx, sy, sz)
-    parent.add(m)
-    return m
-  }
-  const joint = (parent, x, y, z) => {
-    const g = new THREE.Group()
-    g.position.set(x, y, z)
-    parent.add(g)
-    return g
-  }
-  /** A tapered tube hanging down from a joint — sleeves, trouser legs. */
-  const tube = (top, bottom, length, mat, parent, open = false) =>
-    mesh(new THREE.CylinderGeometry(top, bottom, length, 16, 1, open), mat, parent, [0, -length / 2, 0])
-
-  const root = new THREE.Group() // yaw
-  const body = joint(root, 0, 0, 0) // pitch and bank, pivoting at the hips
-  const j = {}
-  const ribbons = []
-
-  /** Cloth tails — the obi knot and the headband — as short chains that sway and stream behind. */
-  const ribbon = (parent, [x, y, z], width, segment, count, mat, droop) => {
-    let at = joint(parent, x, y, z)
-    const chain = []
-    for (let i = 0; i < count; i++) {
-      mesh(new THREE.PlaneGeometry(width, segment), mat, at, [0, -segment / 2, 0])
-      chain.push(at)
-      at = joint(at, 0, -segment, 0)
-    }
-    ribbons.push({ chain, droop, phase: ribbons.length * 1.7 })
-  }
-
-  // Torso: kimono over a pale inner collar, with lacquered shoulder plates.
-  mesh(new THREE.CapsuleGeometry(0.105, 0.22, 6, 16), kimono, body, [0, 0.2, 0], [0, 0, 0], [1.2, 1, 0.82])
-  for (const side of [-1, 1]) {
-    mesh(new THREE.BoxGeometry(0.03, 0.2, 0.012), inner, body, [side * 0.035, 0.28, -0.086], [0, 0, side * -0.42])
-  }
-  mesh(new THREE.CylinderGeometry(0.118, 0.12, 0.07, 20), obi, body, [0, 0.06, 0], [0, 0, 0], [1.14, 1, 0.84])
-  ribbon(body, [0.03, 0.06, 0.1], 0.05, 0.08, 3, obi, 0.35)
-  ribbon(body, [-0.03, 0.05, 0.1], 0.045, 0.07, 3, obi, 0.2)
-
-  // Katana, sheathed at the left hip, hilt forward.
-  const katana = joint(body, -0.12, 0.05, 0)
-  katana.rotation.set(-1.2, 0, 0.12)
-  mesh(new THREE.CylinderGeometry(0.012, 0.014, 0.62, 8), lacquer, katana, [0, -0.2, 0])
-  mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.008, 16), steel, katana, [0, 0.115, 0])
-  mesh(new THREE.CylinderGeometry(0.013, 0.013, 0.16, 8), wrap, katana, [0, 0.2, 0])
-  mesh(new THREE.TorusGeometry(0.014, 0.004, 6, 12), lacing, katana, [0, 0.05, 0], [Math.PI / 2, 0, 0])
-
-  // Head: close-cropped hair, a tied-up topknot of locs, a trimmed beard, and a headband.
-  j.neck = joint(body, 0, 0.4, 0)
-  mesh(new THREE.CylinderGeometry(0.035, 0.04, 0.06, 12), skin, j.neck, [0, 0.01, 0])
-  mesh(new THREE.SphereGeometry(0.074, 22, 18), skin, j.neck, [0, 0.085, 0], [0, 0, 0], [0.93, 1.05, 0.98])
-  mesh(new THREE.SphereGeometry(0.0765, 20, 12, 0, Math.PI * 2, 0, Math.PI * 0.5), hairMat, j.neck, [0, 0.092, 0.004], [0.3, 0, 0])
-  // Back of the head (the half facing +z), then a trimmed beard and moustache on the front half.
-  mesh(new THREE.SphereGeometry(0.0768, 16, 10, 0, Math.PI, Math.PI * 0.4, Math.PI * 0.32), hairMat, j.neck, [0, 0.085, 0.002], [0, 0, 0], [0.93, 1.05, 0.98])
-  mesh(new THREE.SphereGeometry(0.077, 18, 10, Math.PI * 1.12, Math.PI * 0.76, Math.PI * 0.56, Math.PI * 0.36), hairMat, j.neck, [0, 0.082, -0.003], [0, 0, 0], [0.95, 1.06, 1.02])
-  mesh(new THREE.BoxGeometry(0.05, 0.008, 0.012), hairMat, j.neck, [0, 0.052, -0.072], [0.1, 0, 0])
-  mesh(new THREE.SphereGeometry(0.012, 8, 6), skin, j.neck, [0, 0.07, -0.074]) // nose
-  // Topknot: a bun of locs tied at the crown, a few ends falling back.
-  const knot = joint(j.neck, 0, 0.155, 0.03)
-  mesh(new THREE.SphereGeometry(0.03, 14, 10), hairMat, knot, [0, 0.012, 0], [0, 0, 0], [1, 0.8, 1])
-  mesh(new THREE.TorusGeometry(0.02, 0.005, 6, 14), band, knot, [0, -0.004, 0], [Math.PI / 2, 0, 0])
-  for (let i = 0; i < 5; i++) {
-    const a = (i / 5) * Math.PI - Math.PI / 2
-    mesh(new THREE.CapsuleGeometry(0.008, 0.045, 4, 6), hairMat, knot, [Math.sin(a) * 0.018, 0.0, 0.025], [1.1 + (i % 2) * 0.25, 0, Math.sin(a) * 0.4])
-  }
-  mesh(new THREE.TorusGeometry(0.0735, 0.0065, 6, 32), band, j.neck, [0, 0.102, 0.004], [Math.PI / 2 + 0.22, 0, 0])
-  ribbon(j.neck, [0.012, 0.09, 0.076], 0.022, 0.055, 4, band, 0.5)
-  ribbon(j.neck, [-0.012, 0.087, 0.076], 0.02, 0.05, 4, band, 0.65)
-
-  // Arms: wide kimono sleeves over bare forearms, lacquered plates on the shoulders.
-  for (const side of [-1, 1]) {
-    const name = side < 0 ? 'L' : 'R'
-    const shoulder = joint(body, side * 0.15, 0.33, 0)
-    tube(0.042, 0.07, 0.2, kimono, shoulder, true)
-    mesh(new THREE.CylinderGeometry(0.04, 0.04, 0.2, 12), kimono, shoulder, [0, -0.1, 0])
-    const plate = mesh(new THREE.BoxGeometry(0.075, 0.09, 0.085), lacquer, shoulder, [side * 0.03, -0.035, 0], [0, 0, side * 0.3])
-    for (let r = 0; r < 3; r++) mesh(new THREE.BoxGeometry(0.077, 0.005, 0.087), lacing, plate, [0, 0.03 - r * 0.027, 0])
-    const elbow = joint(shoulder, 0, -0.22, 0)
-    mesh(new THREE.CapsuleGeometry(0.033, 0.15, 6, 12), skin, elbow, [0, -0.09, 0])
-    mesh(new THREE.SphereGeometry(0.038, 12, 10), skin, elbow, [0, -0.225, 0], [0, 0, 0], [1, 1.1, 0.95])
-
-    // Legs: wide hakama trousers, sandals.
-    const hip = joint(body, side * 0.068, -0.01, 0)
-    tube(0.062, 0.085, 0.29, hakama, hip)
-    const knee = joint(hip, 0, -0.27, 0)
-    tube(0.085, 0.115, 0.24, hakama, knee, true)
-    mesh(new THREE.CapsuleGeometry(0.03, 0.14, 4, 10), skin, knee, [0, -0.17, 0])
-    mesh(new THREE.BoxGeometry(0.07, 0.03, 0.13), sandal, knee, [0, -0.3, -0.03])
-
-    j['shoulder' + name] = shoulder
-    j['elbow' + name] = elbow
-    j['hip' + name] = hip
-    j['knee' + name] = knee
-  }
-
-  // The aura: a flickering shell of light around the whole figure.
-  const aura = new THREE.Mesh(
-    new THREE.CapsuleGeometry(0.36, 0.7, 16, 32),
-    new THREE.ShaderMaterial({
-      uniforms: { uTime: { value: 0 }, uPower: { value: 0 }, uColor: { value: CALM.clone() } },
-      vertexShader: /* glsl */ `
-        uniform float uTime;
-        uniform float uPower;
-        varying vec3 vN;
-        varying vec3 vView;
-        varying vec3 vObj;
-        ${NOISE}
-        void main() {
-          vObj = position;
-          float n = noise3(vec3(position.xz * 6.0, position.y * 3.0 - uTime * 3.2));
-          float lift = smoothstep(-0.6, 0.7, position.y);
-          vec3 p = position + normal * (n - 0.35) * (0.06 + uPower * 0.12);
-          p.y += lift * n * (0.1 + uPower * 0.35);
-          vec4 mv = modelViewMatrix * vec4(p, 1.0);
-          vN = normalize(normalMatrix * normal);
-          vView = normalize(-mv.xyz);
-          gl_Position = projectionMatrix * mv;
-        }`,
-      fragmentShader: /* glsl */ `
-        uniform float uTime;
-        uniform float uPower;
-        uniform vec3 uColor;
-        varying vec3 vN;
-        varying vec3 vView;
-        varying vec3 vObj;
-        ${NOISE}
-        void main() {
-          float fres = 1.0 - abs(dot(normalize(vN), vView));
-          float flame = fbm(vec3(vObj.x * 6.0, vObj.y * 5.0 - uTime * 3.0, vObj.z * 6.0));
-          // Idle: a faint shimmer at the silhouette. Powered up: tongues of flame break through.
-          float rim = pow(fres, 5.0) * (0.015 + uPower * uPower * 0.6);
-          float tongues = pow(fres, 2.0) * smoothstep(0.52 - uPower * 0.1, 0.82, flame) * (0.004 + uPower * uPower * 0.8);
-          float a = (rim + tongues) * smoothstep(-0.75, -0.25, vObj.y);
-          gl_FragColor = vec4(uColor * a * 1.15, 1.0);
-        }`,
-      transparent: true,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-    })
-  )
-  aura.position.y = 0.1
-  body.add(aura)
-
-  return { root, body, joints: j, aura, ribbons }
+// ── the aura ──────────────────────────────────────────────────────────────────────────
+/** A flickering shell of light around the whole figure: a shimmer at rest, flames when powered up. */
+function auraMaterial() {
+  return new THREE.ShaderMaterial({
+    uniforms: { uTime: { value: 0 }, uPower: { value: 0 }, uColor: { value: CALM.clone() } },
+    vertexShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uPower;
+      varying vec3 vN;
+      varying vec3 vView;
+      varying vec3 vObj;
+      ${NOISE}
+      void main() {
+        vObj = position;
+        float n = noise3(vec3(position.xz * 6.0, position.y * 3.0 - uTime * 3.2));
+        float lift = smoothstep(-0.6, 0.7, position.y);
+        vec3 p = position + normal * (n - 0.35) * (0.06 + uPower * 0.12);
+        p.y += lift * n * (0.1 + uPower * 0.35);
+        vec4 mv = modelViewMatrix * vec4(p, 1.0);
+        vN = normalize(normalMatrix * normal);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uTime;
+      uniform float uPower;
+      uniform vec3 uColor;
+      varying vec3 vN;
+      varying vec3 vView;
+      varying vec3 vObj;
+      ${NOISE}
+      void main() {
+        float fres = 1.0 - abs(dot(normalize(vN), vView));
+        float flame = fbm(vec3(vObj.x * 6.0, vObj.y * 5.0 - uTime * 3.0, vObj.z * 6.0));
+        // Idle: a faint shimmer at the silhouette. Powered up: tongues of flame break through.
+        float rim = pow(fres, 5.0) * (0.015 + uPower * uPower * 0.6);
+        float tongues = pow(fres, 2.0) * smoothstep(0.52 - uPower * 0.1, 0.82, flame) * (0.004 + uPower * uPower * 0.8);
+        float a = (rim + tongues) * smoothstep(-0.75, -0.25, vObj.y);
+        gl_FragColor = vec4(uColor * a * 1.15, 1.0);
+      }`,
+    transparent: true,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+  })
 }
 
 // Poses: [x, y, z] per joint, plus the body's pitch. Blended every frame.
@@ -217,6 +98,42 @@ const POSES = {
     shoulderR: [3.0, 0, 0.1], elbowR: [0, 0, 0],
     hipL: [0, 0, -0.04], kneeL: [-0.1, 0, 0],
     hipR: [0.1, 0, 0.04], kneeR: [-0.25, 0, 0],
+  },
+  // Arms raised, gathering a sphere of energy overhead.
+  charge: {
+    pitch: 0.05,
+    neck: [0.45, 0, 0],
+    shoulderL: [2.95, 0, -0.3], elbowL: [0.2, 0, 0],
+    shoulderR: [2.95, 0, 0.3], elbowR: [0.2, 0, 0],
+    hipL: [0.12, 0, -0.2], kneeL: [-0.25, 0, 0],
+    hipR: [0.12, 0, 0.2], kneeR: [-0.25, 0, 0],
+  },
+  // Following through after the throw.
+  throw: {
+    pitch: -0.35,
+    neck: [0.25, 0, 0],
+    shoulderL: [1.5, 0, -0.12], elbowL: [0.05, 0, 0],
+    shoulderR: [1.5, 0, 0.12], elbowR: [0.05, 0, 0],
+    hipL: [0.55, 0, -0.1], kneeL: [-0.9, 0, 0],
+    hipR: [-0.25, 0, 0.1], kneeR: [-0.2, 0, 0],
+  },
+  // Wide stance, hands cupped at the right hip, drawing everything in.
+  beamCharge: {
+    pitch: 0.12,
+    neck: [0.05, 0, 0],
+    shoulderL: [0.35, 0, 0.85], elbowL: [1.5, 0, 0],
+    shoulderR: [-0.55, 0, 0.15], elbowR: [1.9, 0, 0],
+    hipL: [0.35, 0, -0.4], kneeL: [-0.7, 0, 0],
+    hipR: [-0.1, 0, 0.38], kneeR: [-0.35, 0, 0],
+  },
+  // Both palms driven forward, releasing it.
+  beamFire: {
+    pitch: -0.08,
+    neck: [0.1, 0, 0],
+    shoulderL: [1.57, 0, 0.08], elbowL: [0, 0, 0],
+    shoulderR: [1.57, 0, -0.08], elbowR: [0, 0, 0],
+    hipL: [0.4, 0, -0.4], kneeL: [-0.7, 0, 0],
+    hipR: [-0.15, 0, 0.38], kneeR: [-0.3, 0, 0],
   },
   meditate: {
     pitch: 0,
@@ -267,15 +184,29 @@ const wrapAngle = (a) => Math.atan2(Math.sin(a), Math.cos(a))
 export function createFlyer(stage, web, hooks = {}) {
   const { scene, camera, controls, reducedMotion } = stage
 
-  const { root, body, joints, aura, ribbons } = buildFigure()
+  const { root, body, joints, aura, ribbons } = buildSamurai({ auraMaterial: auraMaterial() })
+  // Reflections for his lacquer, metal and silk. Only standard materials use this; every shader in
+  // the sky draws its own light, so nothing else changes.
+  scene.environment = makeEnvironment(stage.renderer)
+  scene.environmentIntensity = 0.7
   root.visible = false
   scene.add(root)
 
-  const sunLight = new THREE.PointLight('#ffffff', 0, 0, 0)
+  const sunLight = new THREE.DirectionalLight('#ffffff', 0)
+  // Shadows only from him onto himself: a tiny shadow camera that follows him around.
+  sunLight.castShadow = true
+  sunLight.shadow.mapSize.set(1024, 1024)
+  sunLight.shadow.camera.left = sunLight.shadow.camera.bottom = -0.9
+  sunLight.shadow.camera.right = sunLight.shadow.camera.top = 0.9
+  sunLight.shadow.camera.near = 0.1
+  sunLight.shadow.camera.far = 8
+  sunLight.shadow.bias = -0.0004
+  sunLight.shadow.normalBias = 0.012
+  sunLight.shadow.radius = 3
   const fill = new THREE.HemisphereLight('#8fa4c4', '#1c120c', 0)
   // A soft light from just above the camera, so his face and clothes read even with a sun behind him.
   const key = new THREE.DirectionalLight('#ffe9d2', 0)
-  scene.add(sunLight, fill, key, key.target)
+  scene.add(sunLight, sunLight.target, fill, key, key.target)
 
   // ── ki: sparks of energy shed from the aura ─────────────────────────────────────────
   const KI = 1400
@@ -314,6 +245,81 @@ export function createFlyer(stage, web, hooks = {}) {
   scene.add(ki)
   const kiPool = []
 
+  // ── attacks ─────────────────────────────────────────────────────────────────────────
+  const energyShader = (color) =>
+    new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 }, uColor: { value: new THREE.Color(color) }, uIntensity: { value: 0 } },
+      vertexShader: /* glsl */ `
+        varying vec3 vN;
+        varying vec3 vView;
+        varying vec3 vObj;
+        varying vec2 vUv;
+        void main() {
+          vObj = position;
+          vUv = uv;
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          vN = normalize(normalMatrix * normal);
+          vView = normalize(-mv.xyz);
+          gl_Position = projectionMatrix * mv;
+        }`,
+      fragmentShader: /* glsl */ `
+        uniform float uTime;
+        uniform vec3 uColor;
+        uniform float uIntensity;
+        varying vec3 vN;
+        varying vec3 vView;
+        varying vec3 vObj;
+        varying vec2 vUv;
+        ${NOISE}
+        void main() {
+          float facing = abs(dot(normalize(vN), vView));
+          // Swirling energy: noise flowing along the surface, a white-hot centre, a coloured edge.
+          float swirl = fbm(vec3(vObj.xy * 3.0 + vUv.y * 6.0, uTime * 1.6) + vec3(0.0, -uTime * 2.5, 0.0));
+          vec3 core = mix(uColor, vec3(1.0), smoothstep(0.6, 1.0, facing) * 0.8);
+          float a = (0.35 + 0.65 * facing) * (0.7 + swirl * 0.8) * uIntensity;
+          gl_FragColor = vec4(core * a * 1.1, 1.0);
+        }`,
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+    })
+
+  const orb = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), energyShader('#7fb4ff'))
+  const orbHalo = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), energyShader('#bcd4ff'))
+  // The beam: a bright core inside a wider, rougher sheath. Unit height along +y, rotated into place.
+  const beamCore = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 24, 8, true).translate(0, 0.5, 0), energyShader('#ffffff'))
+  const beamSheath = new THREE.Mesh(new THREE.CylinderGeometry(1, 1, 1, 32, 8, true).translate(0, 0.5, 0), energyShader('#6fa8ff'))
+  for (const m of [orb, orbHalo, beamCore, beamSheath]) {
+    m.visible = false
+    m.frustumCulled = false
+    scene.add(m)
+  }
+
+  // Shockwaves: flat rings that face the camera and race outward.
+  const rings = Array.from({ length: 5 }, () => {
+    const m = new THREE.Mesh(
+      new THREE.RingGeometry(0.955, 1, 96),
+      new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide })
+    )
+    m.visible = false
+    scene.add(m)
+    return { mesh: m, life: 1, max: 1, at: new THREE.Vector3(), size: 1 }
+  })
+  let ringCursor = 0
+  function shockwave(at, size, duration, color = '#dfeaff') {
+    const r = rings[ringCursor++ % rings.length]
+    r.at.copy(at)
+    r.size = size
+    r.life = 0
+    r.max = duration
+    r.mesh.material.color.set(color).multiplyScalar(1.4)
+    r.mesh.visible = true
+  }
+
+  let shake = 0
+  /** The attack in progress, if any: { kind: 'bomb' | 'ult', id, t, impacted, onImpact }. */
+  let seq = null
+
   // ── state ───────────────────────────────────────────────────────────────────────────
   let active = false
   const pos = new THREE.Vector3()
@@ -327,6 +333,9 @@ export function createFlyer(stage, web, hooks = {}) {
   let autopilot = null
   let landed = null
   let landAngle = 0
+  // Where the world we're with was last seen, so a finishing blow still has somewhere to land after
+  // the world itself is gone.
+  const lastTarget = { world: new THREE.Vector3(), size: 1 }
   let near = null
   let lastNearKey = ''
   let time = 0
@@ -382,8 +391,8 @@ export function createFlyer(stage, web, hooks = {}) {
     root.position.copy(pos)
     root.visible = true
     ki.visible = true
-    fill.intensity = 0.7
-    key.intensity = 1.1
+    fill.intensity = 0.35
+    key.intensity = 0.75
     burst(80, 3)
     stage.setPiloted(true)
     hooks.onChange?.(true)
@@ -391,6 +400,7 @@ export function createFlyer(stage, web, hooks = {}) {
 
   function exit() {
     if (!active) return
+    endSequence()
     if (landed) liftOff()
     active = false
     autopilot = null
@@ -415,10 +425,44 @@ export function createFlyer(stage, web, hooks = {}) {
     landed = id
     tmp.copy(pos).sub(t.world)
     landAngle = Math.atan2(tmp.z, tmp.x)
-    hooks.onLand?.(id)
+    lastTarget.world.copy(t.world)
+    lastTarget.size = t.size || 1
+    if (reducedMotion) return hooks.onLand?.(id)
+    // Announce yourself: gather a sphere of energy and throw it into the world. The card opens when
+    // it lands. It's only a greeting; the task is untouched.
+    seq = { kind: 'bomb', id, t: 0, impacted: false }
+    hooks.onCharge?.(1.7, 0.7)
+  }
+
+  /**
+   * The finishing move for a task being resolved while you sit with it. `onImpact` fires when the
+   * beam breaks the world — that's the moment to dissolve it. Returns false if it can't play.
+   */
+  function ultimate(id, onImpact) {
+    if (!active || landed !== id || reducedMotion) return false
+    endSequence()
+    seq = { kind: 'ult', id, t: 0, impacted: false, onImpact }
+    hooks.onCharge?.(1.9, 1)
+    return true
+  }
+
+  /** Stop any attack now, making sure whatever it owed (a dissolve, an open card) still happens. */
+  function endSequence() {
+    if (!seq) return
+    const done = seq
+    seq = null
+    orb.visible = orbHalo.visible = beamCore.visible = beamSheath.visible = false
+    if (done.impacted) return
+    if (done.kind === 'ult') done.onImpact?.()
+    else if (landed === done.id) hooks.onLand?.(done.id)
   }
 
   function liftOff() {
+    if (seq?.kind === 'ult') return
+    if (seq) {
+      seq.impacted = true // lifting off mid-throw just abandons it
+      endSequence()
+    }
     const t = landed && web.thoughts.get(landed)
     landed = null
     if (t) vel.copy(pos).sub(t.world).setY(0).normalize().multiplyScalar(4)
@@ -438,6 +482,11 @@ export function createFlyer(stage, web, hooks = {}) {
   function handleKey(e, down) {
     if (!active) return false
     const key = e.key.toLowerCase()
+    // Mid-ultimate, hold your ground: movement and lift-off wait until it's done.
+    if (seq?.kind === 'ult' && (CONTROL.has(key) || key === 'e' || key === 'enter')) {
+      e.preventDefault()
+      return true
+    }
     if (CONTROL.has(key)) {
       if (down) {
         keys.add(key)
@@ -492,7 +541,7 @@ export function createFlyer(stage, web, hooks = {}) {
     let wantClimb = (held('r') ? 1 : 0) - (held('f') ? 1 : 0)
     let wantBoost = held('shift') ? 1 : 0
 
-    if (landed && !worldOf(landed)) liftOff()
+    if (landed && !seq && !worldOf(landed)) liftOff()
 
     let approach = null
     if (autopilot) {
@@ -532,11 +581,16 @@ export function createFlyer(stage, web, hooks = {}) {
     forwardOf(yaw, forward)
 
     if (landed) {
-      // Floating cross-legged beside the world, slowly circling it, facing it.
-      const t = web.thoughts.get(landed)
-      const radius = (t.size || 1) * 3.2 + 1.6
-      landAngle += dt * 0.12
-      tmp.set(Math.cos(landAngle) * radius, (t.size || 1) * 0.5, Math.sin(landAngle) * radius).add(t.world)
+      // Floating cross-legged beside the world, slowly circling it, facing it. Mid-attack, hold still.
+      const live = worldOf(landed)
+      if (live) {
+        lastTarget.world.copy(live.world)
+        lastTarget.size = live.size || lastTarget.size
+      }
+      const t = lastTarget
+      const radius = t.size * (seq?.kind === 'ult' ? 4.5 : 3.2) + 1.6
+      if (!seq) landAngle += dt * 0.12
+      tmp.set(Math.cos(landAngle) * radius, t.size * 0.5, Math.sin(landAngle) * radius).add(t.world)
       vel.lerp(tmp.sub(pos).multiplyScalar(2), k(3, dt))
       pos.addScaledVector(vel, dt)
       tmp.copy(t.world).sub(pos)
@@ -587,7 +641,8 @@ export function createFlyer(stage, web, hooks = {}) {
     const kk = (rate) => k(rate, dt)
 
     // Power: the aura swells with speed and flares as you power up.
-    power += ((landed ? 0 : Math.max(input.boost, Math.min(0.18, speed / 140))) - power) * kk(3)
+    const surge = seq ? (seq.kind === 'ult' ? 1 : 0.55) : 0
+    power += ((landed ? surge : Math.max(input.boost, Math.min(0.18, speed / 140))) - power) * kk(3)
     aura.material.uniforms.uTime.value = time
     aura.material.uniforms.uPower.value = power
     aura.material.uniforms.uColor.value.copy(CALM).lerp(POWER, Math.min(1, power * 1.3))
@@ -597,9 +652,10 @@ export function createFlyer(stage, web, hooks = {}) {
     flow += (Math.min(1, Math.max(0, vel.dot(forward)) / 13) - flow) * kk(2.5)
     const s = landed ? 0 : flow
     const c = landed ? 0 : Math.max(0, Math.min(1, vel.y / 8)) * (1 - s * 0.6)
-    const target = landed ? blendPoses({ meditate: 1 }) : blendPoses({ hover: (1 - s) * (1 - c), fly: s, rise: c })
+    let target = landed ? blendPoses({ meditate: 1 }) : blendPoses({ hover: (1 - s) * (1 - c), fly: s, rise: c })
+    if (seq) target = runSequence(dt) || target
     if (!landed && vel.y < 0) target.pitch -= Math.min(0.3, -vel.y * 0.025) * s
-    const kp = kk(landed ? 2 : 4)
+    const kp = kk(seq ? 9 : landed ? 2 : 4)
     pose.pitch += (target.pitch - pose.pitch) * kp
     for (const name of JOINTS) {
       for (let i = 0; i < 3; i++) pose[name][i] += (target[name][i] - pose[name][i]) * kp
@@ -637,9 +693,10 @@ export function createFlyer(stage, web, hooks = {}) {
       }
     }
     if (nearestSun) {
-      sunLight.position.copy(nearestSun.pos)
+      sunLight.target.position.copy(root.position)
+      sunLight.position.copy(nearestSun.pos).sub(root.position).setLength(4).add(root.position)
       sunLight.color.copy(nearestSun.color).lerp(new THREE.Color('#ffffff'), 0.4)
-      sunLight.intensity = 3.2 * Math.max(0.35, Math.min(1, 160 / Math.max(sunD, 1)))
+      sunLight.intensity = 3.4 * Math.max(0.35, Math.min(1, 160 / Math.max(sunD, 1)))
     }
 
     // Ki sparks rise off the aura and stream behind when moving.
@@ -667,8 +724,11 @@ export function createFlyer(stage, web, hooks = {}) {
         kiPool.splice(i, 1)
         continue
       }
-      q.p.addScaledVector(q.v, dt)
-      q.v.multiplyScalar(Math.exp(-dt * 2.5))
+      if (q.to) q.p.lerp(q.to, 1 - Math.exp(-dt * 5))
+      else {
+        q.p.addScaledVector(q.v, dt)
+        q.v.multiplyScalar(Math.exp(-dt * 2.5))
+      }
       const fade = (1 - q.life / q.max) ** 1.4 * (0.35 + q.gold * 0.9)
       col.copy(CALM).lerp(POWER, Math.min(1, q.gold * 1.3)).multiplyScalar(fade)
       kpos[n * 3] = q.p.x
@@ -703,15 +763,15 @@ export function createFlyer(stage, web, hooks = {}) {
 
     // Camera: the offset from you rides a spring, so it follows every move without a jolt and
     // never falls far behind. Its heading trails yours, so turns sweep the view around.
-    const t = landed && web.thoughts.get(landed)
+    const t = landed && (worldOf(landed) || lastTarget)
     if (t) {
       tmp.copy(pos).sub(t.world).setY(0).normalize()
       tmp2.set(-tmp.z, 0, tmp.x)
-      const d = Math.max(chase, (t.size || 1) * 4.5)
+      const d = Math.max(chase, (t.size || 1) * 4.5) * (seq?.kind === 'ult' ? 1.8 : seq ? 1.35 : 1)
       // From the far side, so the task's card (docked at the right edge) doesn't cover you.
       const want = tmp.clone().multiplyScalar(d * 0.75).addScaledVector(tmp2, -d * 0.55).addScaledVector(UP, d * 0.25)
       smoothDamp(camOffset, want, camOffsetVel, 0.9, dt)
-      smoothDamp(lookOffset, tmp.copy(t.world).sub(pos).multiplyScalar(0.45), lookOffsetVel, 0.7, dt)
+      smoothDamp(lookOffset, tmp.copy(t.world).sub(pos).multiplyScalar(seq ? 0.5 : 0.45).addScaledVector(UP, seq?.kind === 'bomb' ? 0.5 : 0), lookOffsetVel, 0.7, dt)
       camYaw = yaw
     } else {
       camYaw = wrapAngle(camYaw + wrapAngle(yaw - camYaw) * kk(2.2))
@@ -723,14 +783,153 @@ export function createFlyer(stage, web, hooks = {}) {
     }
     camera.position.copy(pos).add(camOffset)
     camera.lookAt(tmp.copy(pos).add(lookOffset))
+    if (shake > 0.001) {
+      shake *= Math.exp(-dt * 4)
+      camera.position.x += (Math.random() - 0.5) * shake
+      camera.position.y += (Math.random() - 0.5) * shake
+      camera.rotateZ((Math.random() - 0.5) * shake * 0.04)
+    }
+    for (const r of rings) {
+      if (!r.mesh.visible) continue
+      r.life += dt
+      const p = r.life / r.max
+      if (p >= 1) {
+        r.mesh.visible = false
+        continue
+      }
+      r.mesh.position.copy(r.at)
+      r.mesh.quaternion.copy(camera.quaternion)
+      r.mesh.scale.setScalar(r.size * (0.15 + (1 - (1 - p) ** 3)))
+      r.mesh.material.opacity = (1 - p) ** 2 * 0.75
+    }
     key.position.copy(camera.position).addScaledVector(UP, 1.5)
     key.target.position.copy(pos)
     hooks.onSpeed?.(speed)
   }
 
+  // ── running an attack ───────────────────────────────────────────────────────────────
+  const ease = (x) => (x < 0.5 ? 2 * x * x : 1 - (-2 * x + 2) ** 2 / 2)
+  const gather = (at, count, spread, gold) => {
+    for (let i = 0; i < count; i++) {
+      const from = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.4, Math.random() - 0.5).normalize().multiplyScalar(spread * (0.4 + Math.random())).add(at)
+      kiPool.push({ p: from, v: new THREE.Vector3(), to: at.clone(), life: 0, max: 0.5 + Math.random() * 0.45, gold })
+    }
+  }
+
+  /** Advances the attack in progress and returns the pose to hold, or null once it's over. */
+  function runSequence(dt) {
+    seq.t += dt
+    const tt = seq.t
+    const live = worldOf(seq.id)
+    const world = live ? live.world : lastTarget.world
+    const size = lastTarget.size
+    for (const m of [orb, orbHalo, beamCore, beamSheath]) m.material.uniforms.uTime.value = time
+
+    if (seq.kind === 'bomb') {
+      const CHARGE = 1.7
+      const THROW = 0.55
+      const radius = Math.min(1.3, 0.35 + size * 0.32)
+      const overhead = new THREE.Vector3(0, 0.95 + radius, 0).add(root.position)
+      if (tt < CHARGE) {
+        // Energy drawn in from all around into a sphere swelling overhead.
+        const grow = ease(tt / CHARGE)
+        orb.visible = orbHalo.visible = true
+        orb.position.copy(overhead)
+        orbHalo.position.copy(overhead)
+        orb.scale.setScalar(radius * grow * 0.8 + 0.02)
+        orbHalo.scale.setScalar(radius * grow * 1.3 + 0.03)
+        orb.material.uniforms.uIntensity.value = 0.55
+        orbHalo.material.uniforms.uIntensity.value = 0.12
+        gather(overhead, 5, 7, 0.05)
+        return blendPoses({ charge: 1 })
+      }
+      if (tt < CHARGE + THROW) {
+        const p = (tt - CHARGE) / THROW
+        orb.position.lerpVectors(overhead, world, p * p)
+        orbHalo.position.copy(orb.position)
+        return blendPoses({ throw: 1 })
+      }
+      if (!seq.impacted) {
+        seq.impacted = true
+        orb.visible = orbHalo.visible = false
+        web.impact?.(seq.id, 1)
+        shockwave(world, size * 5, 0.9)
+        shockwave(world, size * 3, 0.6, '#7fb4ff')
+        shake = 0.3
+        hooks.onFlash?.(0.3, '#cfe2ff')
+        hooks.onBoom?.(0.6)
+        hooks.onLand?.(seq.id)
+      }
+      if (tt > CHARGE + THROW + 1) {
+        seq = null
+        return null
+      }
+      return blendPoses({ throw: 0.35, meditate: 0.65 })
+    }
+
+    // The ultimate: charge at the hip, then a beam held on the world until it breaks.
+    const CHARGE = 1.9
+    const FIRE = 0.18
+    const HOLD = 1.4
+    const FADE = 0.6
+    const width = Math.min(1.1, 0.3 + size * 0.45)
+    if (tt < CHARGE) {
+      const grow = ease(tt / CHARGE)
+      const cup = new THREE.Vector3(0.2, 0.08, 0.05).applyAxisAngle(UP, yaw).add(root.position)
+      orb.visible = orbHalo.visible = true
+      orb.position.copy(cup)
+      orbHalo.position.copy(cup)
+      orb.scale.setScalar(0.05 + grow * 0.16)
+      orbHalo.scale.setScalar(0.1 + grow * 0.36 + Math.sin(time * 40) * 0.02)
+      orb.material.uniforms.uIntensity.value = 1.2
+      orbHalo.material.uniforms.uIntensity.value = 0.45
+      shake = Math.max(shake, grow * 0.06)
+      gather(cup, 9, 6, 0.9)
+      if (tt + dt >= CHARGE) hooks.onFlash?.(0.25, '#ffe2a8')
+      return blendPoses({ beamCharge: 1 })
+    }
+    orb.visible = orbHalo.visible = false
+    const beamT = tt - CHARGE
+    if (beamT < FIRE + HOLD + FADE) {
+      const open = beamT < FIRE ? ease(beamT / FIRE) : beamT < FIRE + HOLD ? 1 : 1 - ease((beamT - FIRE - HOLD) / FADE)
+      const origin = new THREE.Vector3(0, 0.28, -0.45).applyAxisAngle(UP, yaw).add(root.position)
+      const dir = world.clone().sub(origin)
+      const length = Math.max(0.01, dir.length())
+      dir.normalize()
+      for (const [b, scaleW, intensity] of [[beamCore, 0.42, 1.3], [beamSheath, 1, 0.55]]) {
+        b.visible = open > 0.001
+        b.position.copy(origin)
+        b.quaternion.setFromUnitVectors(UP, dir)
+        const flicker = 1 + Math.sin(time * 50 + scaleW * 10) * 0.05
+        b.scale.set(width * scaleW * open * flicker, length, width * scaleW * open * flicker)
+        b.material.uniforms.uIntensity.value = intensity * Math.max(open, 0.001)
+      }
+      if (beamT < FIRE + HOLD) {
+        web.impact?.(seq.id, 0.5)
+        shake = Math.max(shake, 0.16)
+        if (Math.random() < dt * 12) shockwave(world, size * 2.5, 0.35, '#9cc4ff')
+      }
+      if (!seq.impacted && beamT >= FIRE + HOLD * 0.85) {
+        seq.impacted = true
+        seq.onImpact?.()
+        shockwave(world, size * 10, 1.5, '#ffe2a8')
+        shockwave(world, size * 6.5, 1.1)
+        shockwave(world, size * 3.5, 0.8, '#7fb4ff')
+        shake = 0.7
+        hooks.onFlash?.(0.85, '#fff4de')
+        hooks.onBoom?.(1.4)
+      }
+      return blendPoses({ beamFire: 1 })
+    }
+    beamCore.visible = beamSheath.visible = false
+    seq = null
+    return null
+  }
+
   return {
     enter,
     exit,
+    ultimate,
     toggle: () => (active ? exit() : enter()),
     autopilotTo,
     handleKey,

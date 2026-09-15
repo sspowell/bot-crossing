@@ -125,6 +125,9 @@ export const newSession = async (harnessId, dir) => dispatch(harnessId).newSessi
  */
 export const completeThread = async (harnessId, ref) => optional(harnessId, 'completeThread', ref)
 
+/** The undo for the one above: reopen a thread that was just marked done. */
+export const reopenThread = async (harnessId, ref) => optional(harnessId, 'reopenThread', ref)
+
 /** Same exception, same rules: a new thread, and moving one to a different group. */
 export const createThread = async (harnessId, input) => optional(harnessId, 'createThread', input)
 export const moveThread = async (harnessId, ref, to) => optional(harnessId, 'moveThread', ref, to)

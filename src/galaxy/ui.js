@@ -102,9 +102,10 @@ export function createUi(root, actions) {
         <button class="g-chip" data-act="toggleFlight">Stop flying</button>
       </div>
     </div>
-    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>D</kbd> random · <kbd>V</kbd> fly · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
+    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>D</kbd> random · <kbd>V</kbd> fly · <kbd>C</kbd> capture · <kbd>U</kbd> undo · <kbd>Esc</kbd> release</div>
     <a class="g-colony" href="/colony">colony view ↗</a>
     <div class="g-toast" role="status"></div>
+    <div class="g-flash" aria-hidden="true"></div>
     <div class="g-empty" hidden>
       <div class="g-title">the systems are quiet</div>
       <div class="g-sub">No open thoughts found. Add something in TickTick and it will appear here.</div>
@@ -413,12 +414,35 @@ export function createUi(root, actions) {
       .join('')
   }
 
+  /** A brief wash of light over the whole screen, for the moment an attack lands. */
+  function flash(strength = 0.5, color = '#ffffff') {
+    const el = $('.g-flash')
+    el.style.transition = 'none'
+    el.style.background = `radial-gradient(circle at 50% 45%, ${color} 0%, ${color}00 70%)`
+    el.style.opacity = String(Math.min(1, strength))
+    requestAnimationFrame(() => {
+      el.style.transition = `opacity ${Math.round(500 + strength * 900)}ms cubic-bezier(0.22, 1, 0.36, 1)`
+      el.style.opacity = '0'
+    })
+  }
+
   let toastTimer = 0
-  function toast(msg, kind = '') {
+  /** A short note at the bottom. Pass `action` ({ label, run, ms }) to offer a button, like Undo. */
+  function toast(msg, kind = '', action = null) {
     toastEl.textContent = msg
-    toastEl.className = `g-toast show ${kind}`
+    if (action) {
+      const button = document.createElement('button')
+      button.className = 'g-toast-action'
+      button.textContent = action.label
+      button.addEventListener('click', () => {
+        toastEl.className = 'g-toast'
+        action.run()
+      })
+      toastEl.append(button)
+    }
+    toastEl.className = `g-toast show ${kind}${action ? ' has-action' : ''}`
     clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toastEl.className = 'g-toast'), 3600)
+    toastTimer = setTimeout(() => (toastEl.className = 'g-toast'), action?.ms || 3600)
   }
 
   function frame(dt) {
@@ -429,7 +453,7 @@ export function createUi(root, actions) {
   }
 
   return {
-    setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, dockCard, fillPanel, toast, frame, card, panel,
+    setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, dockCard, fillPanel, flash, toast, frame, card, panel,
     openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus, setFlight, setFlightNear, setSound,
     get capturing() {
       return !captureForm.hidden

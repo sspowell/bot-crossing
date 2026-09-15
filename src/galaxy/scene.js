@@ -24,6 +24,9 @@ export function createScene(container) {
   renderer.setClearColor(0x000000, 1)
   renderer.toneMapping = THREE.ACESFilmicToneMapping
   renderer.toneMappingExposure = 0.95
+  // Soft shadows. Only the flying figure casts or receives them, so this costs one tiny extra pass.
+  renderer.shadowMap.enabled = true
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap
   container.appendChild(renderer.domElement)
   renderer.domElement.className = 'g-canvas'
 
@@ -60,7 +63,14 @@ export function createScene(container) {
   const motes = createMotes(uniforms)
   scene.add(motes)
 
-  const composer = new EffectComposer(renderer)
+  // Render the scene into a multisampled, half-float target: the post-processing chain otherwise
+  // throws away the canvas's antialiasing (jagged orbit lines and silhouettes), and 8-bit colour
+  // bands in the glow and the nebula.
+  const target = new THREE.WebGLRenderTarget(innerWidth * renderer.getPixelRatio(), innerHeight * renderer.getPixelRatio(), {
+    type: THREE.HalfFloatType,
+    samples: 4,
+  })
+  const composer = new EffectComposer(renderer, target)
   composer.addPass(new RenderPass(scene, camera))
   const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.6, 0.72)
   composer.addPass(bloom)
@@ -148,6 +158,14 @@ export function createScene(container) {
     }
     if (pixelRatio) {
       renderer.setPixelRatio(Math.min(devicePixelRatio, pixelRatio))
+      // Low detail also drops multisampling, the most expensive part of the upgraded image.
+      const samples = pixelRatio <= 1 ? 0 : 4
+      for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+        if (rt.samples !== samples) {
+          rt.samples = samples
+          rt.dispose()
+        }
+      }
       composer.setPixelRatio(renderer.getPixelRatio())
       composer.setSize(innerWidth, innerHeight)
       uniforms.uPixelRatio.value = renderer.getPixelRatio()

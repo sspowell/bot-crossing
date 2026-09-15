@@ -71,8 +71,9 @@ reports it through the `archived` field and the astronaut goes home on the next 
 
 ### The one exception: `completeThread(ref)` — and its two siblings
 
-`createThread({ title, listId })` and `moveThread(ref, toListId)` follow exactly the same rules
-below and are exposed at `POST /api/create` and `POST /api/move`.
+`createThread({ title, listId })`, `moveThread(ref, toListId)` and `reopenThread(ref)` — the undo
+for an accidental Resolve — follow exactly the same rules below and are exposed at
+`POST /api/create`, `POST /api/move` and `POST /api/reopen`.
 
 Optional, and only the TickTick adapter has them. A to-do list is not somebody's transcript: marking
 a task done is the whole point of the list, and the galaxy view offers a "Resolve" button for it.

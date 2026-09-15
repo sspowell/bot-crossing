@@ -85,6 +85,12 @@ const sunFragment = /* glsl */ `
     vec3 hot = mix(vColor, vec3(1.0, 0.97, 0.9), 0.6);
     vec3 deep = vColor * vec3(0.85, 0.42, 0.26);
     vec3 col = mix(deep, hot, smoothstep(0.32, 0.72, heat));
+    // Sunspots: dark umbrae with softer penumbrae, drifting slowly; bright faculae toward the limb.
+    float spotField = fbm(vObj * 3.2 + vec3(vSeed * 7.0, uTime * 0.006, 0.0));
+    float umbra = smoothstep(0.66, 0.72, spotField);
+    float penumbra = smoothstep(0.6, 0.68, spotField);
+    col *= 1.0 - penumbra * 0.45 - umbra * 0.4;
+    col += hot * smoothstep(0.55, 0.7, cells) * pow(1.0 - mu, 2.0) * 0.5;
     col *= 0.45 + 0.55 * pow(mu, 0.5);
     col += vColor * pow(1.0 - mu, 3.0) * 0.9;
     gl_FragColor = vec4(col * 1.7 * vGlow, 1.0);
@@ -127,8 +133,13 @@ const coronaFragment = /* glsl */ `
     float rays = fbm(vec3(cos(ang) * 2.8, sin(ang) * 2.8, uTime * 0.05 + vSeed * 13.0));
     float ray = pow(smoothstep(0.45, 0.8, rays), 2.0) * exp(-(r - 1.0) * 0.6) * 0.7;
     float a = (haze * 0.95 + ray + wide) * smoothstep(1.0, 0.72, d) * vGlow;
-    if (a < 0.002) discard;
-    gl_FragColor = vec4(vColor * a * 0.75, 1.0);
+    // Prominences: loops of hot gas standing off the edge of the sun, slowly changing shape.
+    vec3 around = vec3(cos(ang) * 5.0, sin(ang) * 5.0, uTime * 0.04 + vSeed * 20.0);
+    float arcs = smoothstep(0.58, 0.8, fbm(around)) * smoothstep(0.35, 0.95, fbm(around * 2.3 + (r - 1.0) * 6.0));
+    float prom = arcs * smoothstep(1.0, 1.04, r) * (1.0 - smoothstep(1.08, 1.45, r)) * vGlow;
+    if (a + prom < 0.002) discard;
+    vec3 promColor = mix(vColor, vec3(1.0, 0.36, 0.14), 0.55);
+    gl_FragColor = vec4(vColor * a * 0.75 + promColor * prom * 1.6, 1.0);
   }`
 
 const planetVertex = /* glsl */ `
@@ -151,10 +162,13 @@ const planetVertex = /* glsl */ `
   varying float vGlow;
   varying float vHeat;
   varying float vFlash;
+  varying mat3 vToWorld;
   void main() {
     vObj = position;
     vec4 wp = modelMatrix * instanceMatrix * vec4(position, 1.0);
-    vN = normalize(mat3(modelMatrix * instanceMatrix) * normal);
+    mat3 m = mat3(modelMatrix * instanceMatrix);
+    vToWorld = mat3(normalize(m[0]), normalize(m[1]), normalize(m[2]));
+    vN = normalize(m * normal);
     vP = wp.xyz;
     vColor = aColor;
     vSun = aSun;
@@ -180,45 +194,107 @@ const planetFragment = /* glsl */ `
   varying float vGlow;
   varying float vHeat;
   varying float vFlash;
+  varying mat3 vToWorld;
   ${NOISE}
+
+  // Height of the surface at a point on the unit sphere, per kind of world.
+  float heightAt(vec3 o, float kind, float seed) {
+    if (kind > 2.5) {
+      float craters = smoothstep(0.58, 0.66, fbm(o * 9.0 + seed * 3.0));
+      return fbm(o * 5.0 + seed * 20.0) * 0.6 - craters * 0.5 + fbm(o * 22.0) * 0.15;
+    }
+    if (seed < 0.45) return fbm(vec3(o.x * 1.6, o.y * 20.0, o.z * 1.6) + seed * 7.0) * 0.25;
+    float h = fbm(o * 2.2 + seed * 31.0);
+    float ridges = 1.0 - abs(fbm(o * 7.0 + seed * 11.0) * 2.0 - 1.0);
+    return h + max(0.0, h - 0.5) * ridges * 0.6;
+  }
+
   void main() {
-    vec3 N = normalize(vN);
+    vec3 o = normalize(vObj);
+    vec3 base = vColor;
+    bool moon = vKind > 2.5;
+    bool gas = !moon && vSeed < 0.45;
+
+    // Relief: tilt the normal by the slope of the height field, measured along the surface.
+    vec3 t1 = normalize(cross(abs(o.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0), o));
+    vec3 t2 = cross(o, t1);
+    const float E = 0.006;
+    float h0 = heightAt(o, vKind, vSeed);
+    float hx = heightAt(normalize(o + t1 * E), vKind, vSeed);
+    float hy = heightAt(normalize(o + t2 * E), vKind, vSeed);
+    float relief = moon ? 0.9 : gas ? 0.15 : 0.55;
+    vec3 bumped = normalize(o - (t1 * (hx - h0) + t2 * (hy - h0)) / E * relief * 0.02);
+
+    vec3 N = normalize(vToWorld * bumped);
+    vec3 Ng = normalize(vN);
     vec3 L = normalize(vSun - vP);
     vec3 V = normalize(cameraPosition - vP);
-    vec3 o = vObj;
-    vec3 base = vColor;
     vec3 surf;
-    bool moon = vKind > 2.5;
+    float wet = 0.0;
 
     if (moon) {
-      float n = fbm(o * 5.0 + vSeed * 20.0);
-      float crater = smoothstep(0.6, 0.64, fbm(o * 9.0 + vSeed * 3.0));
-      surf = mix(vec3(0.12, 0.11, 0.1), vec3(0.62, 0.58, 0.52), n) * (1.0 - crater * 0.35);
-      surf *= base;
-    } else if (vSeed < 0.45) {
-      // A gas giant: bands bent by storms.
+      surf = mix(vec3(0.1, 0.095, 0.09), vec3(0.62, 0.58, 0.52), clamp(h0 + 0.35, 0.0, 1.0)) * base;
+    } else if (gas) {
+      // Bands bent by turbulence, a finer shear inside them, and on some worlds a great storm.
       float warp = fbm(o * 2.0 + vSeed * 13.0);
       float band = sin((o.y + warp * 0.38) * (8.0 + vSeed * 16.0)) * 0.5 + 0.5;
-      float fine = fbm(vec3(o.x * 1.6, o.y * 20.0, o.z * 1.6) + vSeed * 7.0 + vec3(uTime * 0.012, 0.0, 0.0));
-      vec3 light = mix(base, vec3(0.94, 0.86, 0.72), 0.4);
-      surf = mix(base * 0.35, light, band * 0.65 + fine * 0.35);
+      float fine = fbm(vec3(o.x * 1.6, o.y * 26.0, o.z * 1.6) + vSeed * 7.0 + vec3(uTime * 0.012, 0.0, 0.0));
+      vec3 light = mix(base, vec3(0.94, 0.86, 0.72), 0.45);
+      surf = mix(base * 0.32, light, band * 0.62 + fine * 0.38);
+      if (vSeed > 0.12 && vSeed < 0.32) {
+        float lon = atan(o.z, o.x) + uTime * 0.01;
+        vec2 q = vec2(sin(lon - vSeed * 20.0) * 1.6, (o.y + 0.32) * 4.5);
+        float storm = smoothstep(0.55, 0.0, length(q));
+        float swirl = fbm(vec3(q * 3.0, uTime * 0.05));
+        surf = mix(surf, mix(vec3(0.62, 0.3, 0.18), vec3(0.9, 0.62, 0.44), swirl), storm * 0.85);
+      }
     } else {
-      // A rocky world: dark seas, continents, weather.
-      float h = fbm(o * 2.2 + vSeed * 31.0);
-      vec3 sea = mix(base * 0.2, vec3(0.02, 0.05, 0.09), 0.55);
-      vec3 land = mix(base * 0.55, vec3(0.4, 0.33, 0.25), 0.5);
-      surf = mix(sea, land, smoothstep(0.47, 0.53, h));
-      float cloud = smoothstep(0.55, 0.78, fbm(o * 3.4 + vec3(uTime * 0.018, vSeed * 9.0, 0.0)));
-      surf = mix(surf, vec3(0.82, 0.8, 0.78), cloud * 0.5);
+      // Rocky: deep and shallow seas, lowlands, highlands, snow on the peaks, ice at the poles.
+      float sea = 1.0 - smoothstep(0.47, 0.5, h0);
+      vec3 deep = mix(base * 0.08, vec3(0.008, 0.035, 0.1), 0.82);
+      vec3 shallow = mix(base * 0.2, vec3(0.03, 0.19, 0.26), 0.78);
+      vec3 water = mix(deep, shallow, smoothstep(0.38, 0.49, h0));
+      vec3 low = mix(base * 0.55, vec3(0.3, 0.32, 0.18), 0.45);
+      vec3 high = mix(base * 0.5, vec3(0.42, 0.34, 0.26), 0.6);
+      vec3 ground = mix(low, high, smoothstep(0.52, 0.66, h0));
+      ground = mix(ground, vec3(0.86, 0.87, 0.9), smoothstep(0.72, 0.8, h0));
+      surf = mix(ground, water, sea);
+      wet = sea;
+      float cap = smoothstep(0.74, 0.84, abs(o.y) + (fbm(o * 6.0 + vSeed) - 0.5) * 0.18);
+      surf = mix(surf, vec3(0.9, 0.93, 0.96), cap);
+      wet *= 1.0 - cap;
     }
 
     float ndl = dot(N, L);
-    float day = smoothstep(-0.1, 0.5, ndl);
+    float ndlGeo = dot(Ng, L);
+    float day = smoothstep(-0.12, 0.45, ndl) * smoothstep(-0.25, 0.05, ndlGeo);
     float nearSun = clamp(24.0 / length(vSun - vP), 0.65, 1.1);
-    vec3 col = surf * vSunColor * day * nearSun + surf * 0.01;
-    float fres = pow(1.0 - max(dot(N, V), 0.0), 2.6);
-    float lit = 0.12 + 0.88 * smoothstep(-0.35, 0.45, ndl);
-    if (!moon) col += mix(base, vSunColor, 0.5) * fres * lit * 0.85;
+    vec3 col = surf * vSunColor * day * nearSun + surf * 0.012;
+
+    if (!moon && !gas) {
+      // Weather, with the clouds' shadows cast a little away from the sun onto the ground below.
+      vec3 drift = vec3(uTime * 0.018, vSeed * 9.0, 0.0);
+      float cloud = smoothstep(0.55, 0.8, fbm(o * 3.4 + drift));
+      vec3 Lo = normalize(transpose(vToWorld) * L);
+      float shade = smoothstep(0.55, 0.8, fbm(normalize(o - Lo * 0.025) * 3.4 + drift));
+      col *= 1.0 - shade * 0.45 * day;
+      col = mix(col, vec3(0.9, 0.9, 0.88) * vSunColor * (day * nearSun + 0.02), cloud * 0.6);
+      wet *= 1.0 - cloud;
+      // Sunlight glinting off open water.
+      vec3 H = normalize(L + V);
+      col += vSunColor * pow(max(dot(normalize(Ng + (N - Ng) * 0.3), H), 0.0), 90.0) * wet * day * 1.4;
+    }
+
+    float fres = pow(1.0 - max(dot(Ng, V), 0.0), 2.6);
+    float lit = 0.1 + 0.9 * smoothstep(-0.35, 0.45, ndlGeo);
+    if (!moon) {
+      // Atmosphere: blue-white on rocky worlds, the planet's own tint on gas giants, and a band of
+      // sunset orange right at the terminator.
+      vec3 air = gas ? mix(base, vSunColor, 0.5) : mix(vec3(0.45, 0.65, 1.0), vSunColor, 0.35);
+      float dusk = smoothstep(-0.25, 0.05, ndlGeo) * smoothstep(0.35, 0.0, ndlGeo);
+      col += air * fres * lit * 0.8;
+      col += vec3(1.0, 0.45, 0.2) * vSunColor * fres * dusk * 0.9;
+    }
 
     if (vKind > 1.5 && vKind < 2.5) {
       // Tangled: the crust cracks and glows, hotter the further it has fallen.
@@ -515,8 +591,8 @@ export function createWeb(stage) {
   })
 
   const sphereHi = new THREE.SphereGeometry(1, 64, 40)
-  const sphereMid = new THREE.SphereGeometry(1, 48, 32)
-  const sphereLo = new THREE.SphereGeometry(1, 16, 12)
+  const sphereMid = new THREE.SphereGeometry(1, 96, 64)
+  const sphereLo = new THREE.SphereGeometry(1, 32, 20)
   const quad = new THREE.PlaneGeometry(2, 2)
   const ringGeo = new THREE.RingGeometry(1.4, 2.45, 96, 1).rotateX(-Math.PI / 2)
 
@@ -674,7 +750,7 @@ export function createWeb(stage) {
         color: color.clone().lerp(STARLIGHT, Math.random() * 0.6),
       })
     }
-    if (sparkPool.length > 600) sparkPool.splice(0, sparkPool.length - 600)
+    if (sparkPool.length > 1600) sparkPool.splice(0, sparkPool.length - 1600)
   }
 
   // ── data in ─────────────────────────────────────────────────────────────────────────
@@ -1012,9 +1088,17 @@ export function createWeb(stage) {
         }
         t.world.copy(node.pos).add(tmp)
       }
+      // Struck by an attack: a hard shudder that settles.
+      if (t.hit > 0.001) {
+        t.hit *= Math.exp(-dt * 3)
+        const quake = t.hit * (t.size || 1) * 0.18
+        t.world.x += (Math.random() - 0.5) * quake
+        t.world.y += (Math.random() - 0.5) * quake
+        t.world.z += (Math.random() - 0.5) * quake
+      }
 
       let size = sizeOf(t) * (0.2 + 0.8 * arriveEase)
-      let flash = 0
+      let flash = Math.min(0.45, (t.hit || 0) * 0.35)
       if (t.dissolving !== null) {
         const p = t.dissolving / 1.1
         flash = p < 0.25 ? p / 0.25 : Math.max(0, 1 - (p - 0.25) / 0.5)
@@ -1360,11 +1444,25 @@ export function createWeb(stage) {
     setSelected: (id) => (selected = id),
     setFocusNode: (name) => (focusNode = name),
     setFilter: (fn) => (filter = fn),
-    dissolve(id) {
+    /** A resolved task goes out in a burst. `big` is the ending of an ultimate attack. */
+    dissolve(id, { big = false } = {}) {
       const t = thoughts.get(id)
       if (!t) return
       t.dissolving = 0
-      burst(t.world, t.state === 'tangled' ? TANGLED : t.state === 'asking' ? ASKING : STARLIGHT)
+      const tone = t.state === 'tangled' ? TANGLED : t.state === 'asking' ? ASKING : STARLIGHT
+      if (big) {
+        const size = t.size || 1
+        burst(t.world, tone, 520, 10 + size * 14)
+        burst(t.world, new THREE.Color('#ffd27a'), 360, 6 + size * 8)
+        t.hit = 2
+      } else burst(t.world, tone)
+    },
+    /** An attack landing on a world without ending it: flash and shudder. */
+    impact(id, strength = 1) {
+      const t = thoughts.get(id)
+      if (!t || t.dissolving !== null) return
+      t.hit = Math.max(t.hit || 0, strength)
+      burst(t.world, new THREE.Color('#cfe2ff'), Math.round(90 * strength), 8 + (t.size || 1) * 5)
     },
     restore(id, thread) {
       if (thoughts.has(id)) {

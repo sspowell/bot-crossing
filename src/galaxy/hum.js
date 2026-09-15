@@ -74,7 +74,59 @@ export function createHum() {
     wash.frequency.setTargetAtTime(160 + Math.min(80, speed) * 9, ctx.currentTime, 0.3)
   }
 
+  /** A rising swell while energy gathers. */
+  function charge(seconds, strength = 1) {
+    if (!ctx || !on) return
+    const now = ctx.currentTime
+    const osc = ctx.createOscillator()
+    osc.type = 'sawtooth'
+    osc.frequency.setValueAtTime(70, now)
+    osc.frequency.exponentialRampToValueAtTime(260 + strength * 200, now + seconds)
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(300, now)
+    filter.frequency.exponentialRampToValueAtTime(1800, now + seconds)
+    const gain = ctx.createGain()
+    gain.gain.setValueAtTime(0.0001, now)
+    gain.gain.exponentialRampToValueAtTime(0.05 * strength, now + seconds)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + seconds + 0.25)
+    osc.connect(filter).connect(gain).connect(master)
+    osc.start(now)
+    osc.stop(now + seconds + 0.3)
+  }
+
+  /** A deep, soft impact — felt more than heard. */
+  function boom(strength = 1) {
+    if (!ctx || !on) return
+    const now = ctx.currentTime
+    const length = 1.2 + strength * 1.3
+    const buffer = ctx.createBuffer(1, Math.floor(ctx.sampleRate * length), ctx.sampleRate)
+    const data = buffer.getChannelData(0)
+    for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length) ** 2
+    const src = ctx.createBufferSource()
+    src.buffer = buffer
+    const filter = ctx.createBiquadFilter()
+    filter.type = 'lowpass'
+    filter.frequency.setValueAtTime(900 + strength * 600, now)
+    filter.frequency.exponentialRampToValueAtTime(60, now + length)
+    const gain = ctx.createGain()
+    gain.gain.value = 0.35 * strength
+    const thump = ctx.createOscillator()
+    thump.frequency.setValueAtTime(90, now)
+    thump.frequency.exponentialRampToValueAtTime(30, now + 0.6)
+    const thumpGain = ctx.createGain()
+    thumpGain.gain.setValueAtTime(0.25 * strength, now)
+    thumpGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.8)
+    src.connect(filter).connect(gain).connect(master)
+    thump.connect(thumpGain).connect(master)
+    src.start(now)
+    thump.start(now)
+    thump.stop(now + 0.9)
+  }
+
   return {
+    charge,
+    boom,
     start,
     stop,
     setSpeed,

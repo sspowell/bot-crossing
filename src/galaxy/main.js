@@ -32,6 +32,9 @@ let focusNode = null
 let filterId = 'all'
 /** One-thought-at-a-time mode: a queue of the loudest thoughts and where we are in it. */
 let focus = null
+/** Tasks resolved this session, newest last, so an accidental Resolve can be taken back. */
+const resolvedStack = []
+const UNDO_WINDOW_MS = 15 * 60_000
 /** The last task the dice landed on, so a reroll always shows something new. */
 let lastRandom = null
 /** What the current filter chip lets through, or null for everything. */
@@ -116,18 +119,28 @@ const actions = {
     const t = web.thoughts.get(selected)
     if (!t?.thread.canResolve) return
     const { id, thread } = t
-    actions.close()
-    web.dissolve(id)
+    // Sitting with it in flight: finish it with the ultimate, and let the beam break the world.
+    const finisher = flyer.active && flyer.landed === id && flyer.ultimate(id, () => web.dissolve(id, { big: true }))
+    if (finisher) {
+      selected = null
+      web.setSelected(null)
+      ui.card.hidden = true
+    } else {
+      actions.close()
+      web.dissolve(id)
+    }
     try {
       await post('/api/complete', { harness: thread.harness, ref: thread.ref })
       threads = threads.filter((x) => x.id !== id)
-      ui.toast(`Resolved — “${thread.title}”`)
+      resolvedStack.push({ id, thread, at: Date.now() })
+      if (resolvedStack.length > 20) resolvedStack.shift()
+      ui.toast(`Resolved — “${thread.title}”`, '', { label: 'Undo', run: () => actions.undo(), ms: 10_000 })
       refreshUi()
       if (focus) {
         focus.queue = focus.queue.filter((q) => q !== id)
         if (!focus.queue.length) {
           actions.exitFocus()
-          ui.toast('The web is calm — nothing tangled or asking.')
+          ui.toast('The web is calm — nothing tangled or asking.', '', { label: 'Undo', run: () => actions.undo(), ms: 10_000 })
         } else {
           focus.index %= focus.queue.length
           setTimeout(showFocused, 1100)
@@ -137,6 +150,28 @@ const actions = {
       ui.toast(err.message, 'err')
       // It still exists in TickTick, so the next poll brings it back.
       setTimeout(poll, 400)
+    }
+  },
+
+  /** Take back the most recent Resolve: reopen the task in TickTick and let its world return. */
+  async undo() {
+    while (resolvedStack.length && Date.now() - resolvedStack[resolvedStack.length - 1].at > UNDO_WINDOW_MS) resolvedStack.pop()
+    const last = resolvedStack.pop()
+    if (!last) return ui.toast('Nothing to undo.')
+    const { thread } = last
+    try {
+      await post('/api/reopen', { harness: thread.harness, ref: thread.ref })
+      web.birth(thread.project || 'Unsorted')
+      ui.toast(
+        thread.repeats
+          ? `Brought back “${thread.title}” — TickTick had already scheduled its next repeat, so check for a duplicate.`
+          : `Brought back “${thread.title}”`
+      )
+      setTimeout(poll, 600)
+    } catch (err) {
+      // Put it back on the stack so another try is possible.
+      resolvedStack.push(last)
+      ui.toast(`Couldn't undo — ${err.message}`, 'err')
     }
   },
 
@@ -282,6 +317,9 @@ const flyer = createFlyer(stage, web, {
     ui.card.hidden = true
   },
   onSpeed: (v) => hum.setSpeed(v),
+  onCharge: (seconds, strength) => hum.charge(seconds, strength),
+  onBoom: (strength) => hum.boom(strength),
+  onFlash: (strength, color) => ui.flash(strength, color),
 })
 if (import.meta.env?.DEV) Object.assign(window.__galaxy, { flyer, actions, ui })
 
@@ -532,6 +570,10 @@ addEventListener('keyup', (e) => flyer.handleKey(e, false))
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select')) return
   const key = e.key.toLowerCase()
+  if ((key === 'z' && (e.ctrlKey || e.metaKey)) || (key === 'u' && !e.ctrlKey && !e.metaKey && !e.altKey)) {
+    e.preventDefault()
+    return actions.undo()
+  }
   if (flyer.active) {
     if (ui.capturing && e.key === 'Escape') return ui.closeCapture()
     if (flyer.handleKey(e, true)) return

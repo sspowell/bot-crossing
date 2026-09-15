@@ -85,6 +85,7 @@ test('writes are validated before anything reaches TickTick', async () => {
   assert.equal((await ticktick.createThread({ title: 'x', listId: '../../etc' })).ok, false)
   assert.equal((await ticktick.moveThread({ projectId: 'a', taskId: 'b/../c' }, 'z')).ok, false)
   assert.equal((await ticktick.completeThread({ projectId: 'a?x=1', taskId: 'b' })).ok, false)
+  assert.equal((await ticktick.reopenThread({ projectId: 'a', taskId: '../b' })).ok, false)
 })
 
 test('priority reaches building size, and nothing carries the token', () => {

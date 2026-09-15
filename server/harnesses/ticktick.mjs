@@ -131,6 +131,8 @@ export function toThread(task, listName, now = Date.now(), { writable = false } 
     listId: projectId,
     canOpen: Boolean(task.id && projectId),
     canResolve: Boolean(writable && task.id && projectId),
+    // Completing a repeating task makes TickTick schedule the next one, which an undo can't take back.
+    repeats: Boolean(task.repeatFlag),
     ref: {
       url: task.id && projectId ? `https://ticktick.com/webapp/#p/${projectId}/tasks/${task.id}` : '',
       projectId,
@@ -259,6 +261,30 @@ async function completeThread(ref) {
   return { ok: true }
 }
 
+/**
+ * Undo a Resolve: set a completed task back to open. Uses the ordinary update endpoint with just
+ * `status: 0` — verified against a real account to reopen the task with its notes, due date,
+ * priority, tags and checklist untouched. Read back afterwards rather than trusting the 200, the
+ * same way `moveThread` does.
+ */
+async function reopenThread(ref) {
+  const projectId = String(ref?.projectId || '')
+  const taskId = String(ref?.taskId || '')
+  if (!SAFE_ID.test(projectId) || !SAFE_ID.test(taskId)) return { ok: false, error: 'That task reference is malformed.' }
+
+  const auth = await writableToken()
+  if (auth.error) return { ok: false, error: auth.error }
+  try {
+    await call(auth.token, `/task/${taskId}`, { method: 'POST', body: { id: taskId, projectId, status: 0 } })
+    const back = await call(auth.token, `/project/${projectId}/task/${taskId}`).catch(() => null)
+    cache = { ...cache, at: 0 } // show it again on the very next poll
+    if (!back?.id || back.status === 2) return { ok: false, error: "TickTick accepted the undo but the task is still completed." }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
 async function writableToken() {
   const { token, writable } = await readAuth()
   if (!token) return { error: 'No TickTick login yet.' }
@@ -326,6 +352,7 @@ export default {
   openThread,
   newSession,
   completeThread,
+  reopenThread,
   createThread,
   moveThread,
   diagnostic,

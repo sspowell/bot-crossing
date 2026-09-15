@@ -10,6 +10,7 @@ import {
   newSession as harnessNewSession,
   openThread as harnessOpenThread,
   completeThread as harnessCompleteThread,
+  reopenThread as harnessReopenThread,
   createThread as harnessCreateThread,
   moveThread as harnessMoveThread,
   scanThreads,
@@ -435,6 +436,12 @@ export async function apiMiddleware(req, res, next) {
       const { harness, ref } = await readJsonBody(req)
       const done = await harnessCompleteThread(harness, ref)
       return send(res, done?.ok ? 200 : 400, done?.ok ? { ok: true } : { ok: false, error: done?.error || 'Could not complete that' })
+    }
+
+    if (url.pathname === '/api/reopen' && req.method === 'POST') {
+      const { harness, ref } = await readJsonBody(req)
+      const back = await harnessReopenThread(harness, ref)
+      return send(res, back?.ok ? 200 : 400, back?.ok ? { ok: true } : { ok: false, error: back?.error || 'Could not bring that back' })
     }
 
     if (url.pathname === '/api/create' && req.method === 'POST') {
