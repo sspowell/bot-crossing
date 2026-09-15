@@ -273,6 +273,48 @@ kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 
 .g-flight-row { display: flex; gap: 6px; pointer-events: auto; }
 .g-flight-row .g-chip { border: 1px solid var(--hair); background: var(--glass); backdrop-filter: blur(12px); }
 
+/* radar, edge markers, touch controls */
+.g-radar {
+  position: fixed; left: 22px; bottom: 22px; width: 150px; height: 150px; z-index: 6;
+  border-radius: 50%; cursor: pointer; pointer-events: auto;
+  box-shadow: 0 10px 40px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(244,236,223,0.08);
+}
+.g-beacons { position: fixed; inset: 0; z-index: 5; pointer-events: none; }
+.g-beacon {
+  position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 7px; pointer-events: auto;
+  padding: 5px 10px 5px 6px; border-radius: 999px; border: 1px solid var(--hair); background: var(--glass);
+  backdrop-filter: blur(10px); font-size: 11px; color: var(--soft); cursor: pointer; white-space: nowrap;
+}
+.g-beacon i { width: 14px; height: 14px; clip-path: polygon(100% 50%, 0 0, 28% 50%, 0 100%); display: block; }
+.g-beacon .n { color: var(--star); font-family: var(--display); font-style: italic; font-size: 13px; }
+.g-beacon .d { color: var(--faint); }
+.g-beacon.heading { border-color: rgba(244,236,223,0.4); }
+.g-touch { position: fixed; inset: auto 0 0 0; height: 0; z-index: 7; }
+.g-stick {
+  position: fixed; left: 28px; bottom: 34px; width: 132px; height: 132px; border-radius: 50%; touch-action: none;
+  background: radial-gradient(circle, rgba(244,236,223,0.08) 0%, rgba(244,236,223,0.03) 70%);
+  border: 1px solid rgba(244,236,223,0.18); backdrop-filter: blur(8px);
+}
+.g-stick i {
+  position: absolute; left: 50%; top: 50%; width: 54px; height: 54px; margin: -27px 0 0 -27px; border-radius: 50%;
+  background: rgba(244,236,223,0.22); border: 1px solid rgba(244,236,223,0.35); transition: transform 120ms var(--ease);
+}
+.g-tbuttons { position: fixed; right: 24px; bottom: 30px; display: grid; grid-template-columns: repeat(2, 64px); gap: 10px; }
+.g-tbtn {
+  height: 64px; border-radius: 20px; border: 1px solid rgba(244,236,223,0.2); background: var(--glass);
+  backdrop-filter: blur(8px); color: var(--star); font-size: 20px; touch-action: none; user-select: none;
+}
+.g-tbtn.wide { font-size: 13px; font-weight: 600; height: 48px; }
+.g-tbtn.power { color: var(--asking); }
+.g-tbtn.held { background: rgba(244,236,223,0.18); }
+/* With touch controls up: radar sits above the stick, notes and the flight row above the buttons. */
+.touch-flight .g-radar { left: 38px; bottom: 186px; width: 112px; height: 112px; }
+.touch-flight .g-flight-keys, .touch-flight .g-hint, .touch-flight .g-filters { display: none; }
+.touch-flight .g-flight { bottom: auto; top: calc(100vh - 330px); right: 24px; left: auto; transform: none; align-items: flex-end; }
+.touch-flight .g-toast { bottom: 250px; }
+.touch-flight .g-flight { max-width: 62vw; }
+.touch-flight .g-flight-near { font-size: 15px; text-align: right; }
+
 .g-flash { position: fixed; inset: 0; z-index: 4; pointer-events: none; opacity: 0; mix-blend-mode: screen; }
 
 .g-empty { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; z-index: 2; pointer-events: none; }

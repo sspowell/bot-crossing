@@ -53,6 +53,9 @@ export function createUi(root, actions) {
       <div class="g-set-row"><span>Glow</span>
         <div class="g-seg" data-setting="bloom"><button data-value="on">On</button><button data-value="off">Off</button></div>
       </div>
+      <div class="g-set-row"><span>Touch</span>
+        <div class="g-seg" data-setting="touch"><button data-value="auto">Auto</button><button data-value="on">On</button><button data-value="off">Off</button></div>
+      </div>
       <div class="g-set-row"><span>Detail</span>
         <div class="g-seg" data-setting="detail"><button data-value="low">Low</button><button data-value="balanced">Balanced</button><button data-value="high">High</button></div>
       </div>
@@ -94,9 +97,21 @@ export function createUi(root, actions) {
     </aside>
 
     <nav class="g-filters" aria-label="Filter thoughts"></nav>
+    <canvas class="g-radar" width="300" height="300" hidden aria-label="Radar: systems around you. Tap one to fly there."></canvas>
+    <div class="g-beacons" aria-hidden="true"></div>
+    <div class="g-touch" hidden>
+      <div class="g-stick" aria-label="Fly: push up to go forward, sideways to turn"><i></i></div>
+      <div class="g-tbuttons">
+        <button class="g-tbtn" data-hold="climb" aria-label="Rise">▲</button>
+        <button class="g-tbtn" data-hold="sink" aria-label="Sink">▼</button>
+        <button class="g-tbtn power" data-hold="boost" aria-label="Power up">⚡</button>
+        <button class="g-tbtn wide" data-tap="land">Land</button>
+        <button class="g-tbtn wide" data-tap="next">Next ›</button>
+      </div>
+    </div>
     <div class="g-flight" hidden>
       <div class="g-flight-near" aria-live="polite"></div>
-      <div class="g-flight-keys"><kbd>W</kbd><kbd>S</kbd> fly · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>R</kbd><kbd>F</kbd> rise / sink · <kbd>Shift</kbd> power up · <kbd>E</kbd> land · click a world to fly there · <kbd>Esc</kbd> stop</div>
+      <div class="g-flight-keys">drag to look · <kbd>W</kbd><kbd>S</kbd> fly · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>R</kbd><kbd>F</kbd> rise / sink · <kbd>Shift</kbd> power up · <kbd>E</kbd> land · <kbd>Q</kbd> next system · <kbd>Esc</kbd> stop</div>
       <div class="g-flight-row">
         <button class="g-chip g-flight-sound" data-act="toggleSound">Sound off</button>
         <button class="g-chip" data-act="toggleFlight">Stop flying</button>
@@ -176,7 +191,8 @@ export function createUi(root, actions) {
     $('.g-action.capture').hidden = !on
   }
 
-  function setSettings({ bloom, detail }) {
+  function setSettings({ bloom, detail, touch = 'auto' }) {
+    for (const b of root.querySelectorAll('[data-setting="touch"] button')) b.classList.toggle('on', b.dataset.value === touch)
     for (const b of root.querySelectorAll('[data-setting="bloom"] button')) b.classList.toggle('on', b.dataset.value === (bloom ? 'on' : 'off'))
     for (const b of root.querySelectorAll('[data-setting="detail"] button')) b.classList.toggle('on', b.dataset.value === detail)
   }
@@ -237,6 +253,234 @@ export function createUi(root, actions) {
   function setSound(on) {
     $('.g-flight-sound').textContent = on ? 'Sound on' : 'Sound off'
     $('.g-flight-sound').classList.toggle('on', on)
+  }
+
+  // ── flying: touch controls ─────────────────────────────────────────────────────────
+  // A thumb stick (push up to fly, sideways to turn), hold buttons for rise/sink/power, and taps
+  // for land and next system. Dragging anywhere else on the sky still aims the view.
+  const stick = $('.g-stick')
+  const knob = stick.querySelector('i')
+  let stickId = null
+  const stickMove = (e) => {
+    const r = stick.getBoundingClientRect()
+    const max = r.width / 2
+    let x = e.clientX - (r.left + max)
+    let y = e.clientY - (r.top + max)
+    const len = Math.hypot(x, y)
+    if (len > max) {
+      x = (x / len) * max
+      y = (y / len) * max
+    }
+    knob.style.transform = `translate(${x}px, ${y}px)`
+    // A small dead zone, then a gentle curve so small nudges stay small.
+    const shape = (v) => Math.sign(v) * Math.max(0, (Math.abs(v) - 0.12) / 0.88) ** 1.4
+    actions.touchInput({ thrust: shape(-y / max), turn: shape(-x / max) })
+  }
+  stick.addEventListener('pointerdown', (e) => {
+    stickId = e.pointerId
+    stick.setPointerCapture(e.pointerId)
+    stickMove(e)
+  })
+  stick.addEventListener('pointermove', (e) => e.pointerId === stickId && stickMove(e))
+  const stickEnd = (e) => {
+    if (e.pointerId !== stickId) return
+    stickId = null
+    knob.style.transform = ''
+    actions.touchInput({ thrust: 0, turn: 0 })
+  }
+  stick.addEventListener('pointerup', stickEnd)
+  stick.addEventListener('pointercancel', stickEnd)
+  for (const b of root.querySelectorAll('.g-tbtn[data-hold]')) {
+    const on = (v) => (e) => {
+      e.preventDefault()
+      b.classList.toggle('held', v)
+      actions.touchHold(b.dataset.hold, v)
+    }
+    b.addEventListener('pointerdown', on(true))
+    b.addEventListener('pointerup', on(false))
+    b.addEventListener('pointercancel', on(false))
+    b.addEventListener('pointerleave', on(false))
+  }
+  for (const b of root.querySelectorAll('.g-tbtn[data-tap]')) b.addEventListener('click', () => actions.touchTap(b.dataset.tap))
+
+  function setTouch(on) {
+    $('.g-touch').hidden = !on
+    root.classList.toggle('touch-flight', on)
+  }
+
+  // ── flying: radar and edge markers ─────────────────────────────────────────────────
+  // A top-down radar that turns with you (straight ahead is up), and arrows at the screen edge
+  // pointing to systems you can't see. Between them it's hard to lose your way.
+  const radar = $('.g-radar')
+  const rctx = radar.getContext('2d')
+  const RADAR_RANGE = 320
+  let radarDots = []
+  radar.addEventListener('click', (e) => {
+    const r = radar.getBoundingClientRect()
+    const x = ((e.clientX - r.left) / r.width) * radar.width
+    const y = ((e.clientY - r.top) / r.height) * radar.height
+    const hit = radarDots.reduce((best, d) => (Math.hypot(d.x - x, d.y - y) < (best ? Math.hypot(best.x - x, best.y - y) : 40) ? d : best), null)
+    if (hit) actions.flyToSystem(hit.name)
+  })
+
+  function drawRadar(web, nav) {
+    const W = radar.width
+    const c = W / 2
+    const R = W / 2 - 14
+    const scale = R / RADAR_RANGE
+    rctx.clearRect(0, 0, W, W)
+    rctx.save()
+    const bg = rctx.createRadialGradient(c, c, 0, c, c, R + 10)
+    bg.addColorStop(0, 'rgba(18,14,12,0.72)')
+    bg.addColorStop(1, 'rgba(8,6,6,0.5)')
+    rctx.fillStyle = bg
+    rctx.beginPath()
+    rctx.arc(c, c, R + 10, 0, Math.PI * 2)
+    rctx.fill()
+    rctx.strokeStyle = 'rgba(244,236,223,0.12)'
+    rctx.lineWidth = 2
+    for (const f of [1, 0.5]) {
+      rctx.beginPath()
+      rctx.arc(c, c, R * f, 0, Math.PI * 2)
+      rctx.stroke()
+    }
+    // Field of view wedge, straight ahead.
+    rctx.fillStyle = 'rgba(244,236,223,0.05)'
+    rctx.beginPath()
+    rctx.moveTo(c, c)
+    rctx.arc(c, c, R, -Math.PI / 2 - 0.45, -Math.PI / 2 + 0.45)
+    rctx.fill()
+
+    const cosA = Math.cos(nav.aimYaw)
+    const sinA = Math.sin(nav.aimYaw)
+    const place = (p) => {
+      const dx = p.x - nav.pos.x
+      const dz = p.z - nav.pos.z
+      // Right = (cos, −sin); ahead = (−sin, −cos).
+      let sx = dx * cosA - dz * sinA
+      let sy = -(dx * sinA + dz * cosA)
+      const dist = Math.hypot(sx, sy)
+      const edge = dist * scale > R
+      if (edge) {
+        sx = (sx / dist) * (RADAR_RANGE - 4)
+        sy = (sy / dist) * (RADAR_RANGE - 4)
+      }
+      return { x: c + sx * scale, y: c - sy * scale, edge, dist: Math.hypot(dx, dz), dy: p.y - nav.pos.y }
+    }
+
+    // Worlds near you: tiny dots, coloured by state.
+    for (const t of web.thoughts.values()) {
+      if (t.leaving || t.dissolving !== null) continue
+      const q = place(t.world)
+      if (q.edge) continue
+      rctx.fillStyle = t.state === 'tangled' ? 'rgba(255,90,74,0.9)' : t.state === 'asking' ? 'rgba(255,196,107,0.9)' : 'rgba(244,236,223,0.45)'
+      rctx.beginPath()
+      rctx.arc(q.x, q.y, t.state === 'drifting' ? 2 : 3, 0, Math.PI * 2)
+      rctx.fill()
+    }
+    // Suns, with their names, clamped to the rim when out of range.
+    radarDots = []
+    rctx.font = '600 17px Manrope, system-ui, sans-serif'
+    rctx.textAlign = 'center'
+    for (const n of web.nodes.values()) {
+      if (n.leaving) continue
+      const q = place(n.pos)
+      const hex = `#${n.color.getHexString()}`
+      const heading = nav.heading === n.name
+      rctx.fillStyle = hex
+      rctx.shadowColor = hex
+      rctx.shadowBlur = heading ? 18 : 10
+      rctx.beginPath()
+      rctx.arc(q.x, q.y, q.edge ? 5 : 7, 0, Math.PI * 2)
+      rctx.fill()
+      rctx.shadowBlur = 0
+      if (heading) {
+        rctx.strokeStyle = hex
+        rctx.lineWidth = 2
+        rctx.beginPath()
+        rctx.arc(q.x, q.y, 13 + Math.sin(performance.now() / 180) * 2, 0, Math.PI * 2)
+        rctx.stroke()
+      }
+      if (!q.edge) {
+        rctx.fillStyle = 'rgba(244,236,223,0.75)'
+        rctx.fillText(n.name.length > 14 ? n.name.slice(0, 13) + '…' : n.name, q.x, q.y - 13)
+      }
+      radarDots.push({ name: n.name, x: q.x, y: q.y })
+    }
+    // You: a chevron pointing ahead.
+    rctx.fillStyle = '#f4ecdf'
+    rctx.beginPath()
+    rctx.moveTo(c, c - 10)
+    rctx.lineTo(c + 7, c + 7)
+    rctx.lineTo(c, c + 3)
+    rctx.lineTo(c - 7, c + 7)
+    rctx.closePath()
+    rctx.fill()
+    rctx.restore()
+  }
+
+  const beaconsEl = $('.g-beacons')
+  const beacons = new Map()
+  const ndc = { x: 0, y: 0 }
+  function placeBeacons(web, camera, nav) {
+    const seen = new Set()
+    const placed = []
+    for (const n of web.nodes.values()) {
+      if (n.leaving) continue
+      seen.add(n.name)
+      let el = beacons.get(n.name)
+      if (!el) {
+        el = document.createElement('button')
+        el.className = 'g-beacon'
+        el.innerHTML = '<i></i><span class="n"></span><span class="d"></span>'
+        el.addEventListener('click', () => actions.flyToSystem(n.name))
+        beaconsEl.appendChild(el)
+        beacons.set(n.name, el)
+      }
+      const v = n.pos.clone().applyMatrix4(camera.matrixWorldInverse)
+      const behind = v.z > 0
+      const p = n.pos.clone().project(camera)
+      ndc.x = behind ? -p.x : p.x
+      ndc.y = behind ? -p.y : p.y
+      const onScreen = !behind && Math.abs(p.x) < 0.92 && Math.abs(p.y) < 0.88
+      // No marker for the system you're already in — only the ones worth finding.
+      const here = n.pos.distanceTo(nav.pos) < n.radius * 1.5 + 50
+      el.hidden = onScreen || here
+      if (el.hidden) continue
+      // Push the point out to the screen's edge along its direction from the centre.
+      const a = Math.atan2(ndc.y, ndc.x)
+      const m = Math.max(Math.abs(Math.cos(a)) / 0.9, Math.abs(Math.sin(a)) / 0.8)
+      const ex = Math.cos(a) / m
+      const ey = Math.sin(a) / m
+      // Keep the whole chip on screen, clear of the top bar, and don't let chips pile onto each other.
+      const w = el.offsetWidth || 120
+      const h = el.offsetHeight || 26
+      let x = Math.max(12 + w / 2, Math.min(innerWidth - 12 - w / 2, (ex * 0.5 + 0.5) * innerWidth))
+      let y = Math.max(90 + h / 2, Math.min(innerHeight - 70 - h / 2, (-ey * 0.5 + 0.5) * innerHeight))
+      for (let pass = 0; pass < 4; pass++) {
+        const clash = placed.find((q) => Math.abs(q.x - x) < (q.w + w) / 2 + 4 && Math.abs(q.y - y) < (q.h + h) / 2 + 4)
+        if (!clash) break
+        y = y + h + 6 > innerHeight - 70 - h / 2 ? clash.y - h - 6 : clash.y + h + 6
+      }
+      placed.push({ x, y, w, h })
+      el.style.transform = `translate3d(${(x - w / 2).toFixed(1)}px, ${(y - h / 2).toFixed(1)}px, 0)`
+      el.querySelector('i').style.transform = `rotate(${(-a).toFixed(3)}rad)`
+      el.querySelector('i').style.background = `#${n.color.getHexString()}`
+      el.querySelector('.n').textContent = n.name
+      el.querySelector('.d').textContent = `${Math.round(n.pos.distanceTo(nav.pos))} away`
+      el.classList.toggle('heading', nav.heading === n.name)
+    }
+    for (const [name, el] of beacons) {
+      if (!seen.has(name)) {
+        el.remove()
+        beacons.delete(name)
+      }
+    }
+  }
+
+  function setNav(on) {
+    radar.hidden = !on
+    beaconsEl.hidden = !on
   }
 
   function setFocus(info) {
@@ -455,6 +699,7 @@ export function createUi(root, actions) {
   return {
     setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, dockCard, fillPanel, flash, toast, frame, card, panel,
     openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus, setFlight, setFlightNear, setSound,
+    setTouch, drawRadar, placeBeacons, setNav,
     get capturing() {
       return !captureForm.hidden
     },

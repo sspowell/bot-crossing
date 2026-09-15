@@ -13,11 +13,17 @@ import { buildSamurai, makeEnvironment } from './samurai.js'
  * turning carves the path instead of sliding it, and the camera rides on a spring. Nothing here
  * changes a task — landing only opens its card.
  *
+ * You fly where you look: drag to aim (mouse, or a finger on a phone) and W carries you that way,
+ * climbing or diving with the view. The camera stays behind you and levels itself when you leave it
+ * alone, so "up" never gets lost.
+ *
+ *   drag             look / aim
  *   W / S or ↑ / ↓   fly forward / slow down
  *   A / D or ← / →   turn
  *   R / F            rise / sink
  *   Shift            power up
  *   E or Enter       land beside the nearest world, or fly on
+ *   Q                fly to the next system
  *   Esc              stop flying
  *   click a planet   fly there and land
  *   scroll           pull the camera in or out
@@ -341,8 +347,20 @@ export function createFlyer(stage, web, hooks = {}) {
   let time = 0
   const pose = blendPoses({ hover: 1 })
 
-  // Eased controls: keys set targets, these follow them smoothly.
+  // Eased controls: keys and touch set targets, these follow them smoothly.
   const input = { thrust: 0, turn: 0, climb: 0, boost: 0 }
+  // On-screen controls for a phone or tablet, merged with the keyboard.
+  const touch = { thrust: 0, turn: 0, climb: 0, boost: 0 }
+  // Where you're aiming: the camera looks this way and thrust carries you this way.
+  let aimYaw = 0
+  let aimPitch = 0
+  let lastLook = -10
+  let bodyPitch = 0
+  let camPitch = 0
+  let leashed = false
+  const aimDir = new THREE.Vector3()
+  const dirOf = (yawA, pitchA, out) => out.set(-Math.sin(yawA) * Math.cos(pitchA), Math.sin(pitchA), -Math.cos(yawA) * Math.cos(pitchA))
+  const BASE_FOV = camera.fov
   let wasBoosting = false
   let flow = 0 // smoothed forward-speed fraction, drives the pose
 
@@ -378,7 +396,8 @@ export function createFlyer(stage, web, hooks = {}) {
     active = true
     const dir = camera.getWorldDirection(new THREE.Vector3())
     yaw = Math.atan2(-dir.x, -dir.z)
-    camYaw = yaw
+    camYaw = aimYaw = yaw
+    aimPitch = camPitch = bodyPitch = 0
     pos.copy(controls.target).addScaledVector(forwardOf(yaw, tmp), -Math.min(30, camera.position.distanceTo(controls.target) * 0.3))
     vel.set(0, 0, 0)
     yawVel = 0
@@ -412,6 +431,9 @@ export function createFlyer(stage, web, hooks = {}) {
     fill.intensity = 0
     key.intensity = 0
     controls.target.copy(pos)
+    Object.assign(touch, { thrust: 0, turn: 0, climb: 0, boost: 0 })
+    camera.fov = BASE_FOV
+    camera.updateProjectionMatrix()
     stage.setPiloted(false)
     lastNearKey = ''
     hooks.onNear?.(null)
@@ -475,6 +497,56 @@ export function createFlyer(stage, web, hooks = {}) {
     autopilot = id
   }
 
+  /** Fly to a system and hold position just outside it, facing its sun. */
+  function flyToSystem(name) {
+    const n = web.nodes.get(name)
+    if (!n) return
+    if (landed) liftOff()
+    // Aim a little above the sun rather than straight at it, so you arrive looking across the system.
+    autopilot = { name, point: n.pos.clone().add(new THREE.Vector3(0, n.radius * 3 + 18, 0)) }
+  }
+
+  /** The next system round from wherever you're facing — Q, or the touch button. */
+  function nextSystem() {
+    const list = [...web.nodes.values()].filter((n) => !n.leaving)
+    if (!list.length) return
+    const current = typeof autopilot === 'object' && autopilot ? autopilot.name : null
+    // Order by bearing, clockwise from straight ahead, skipping the system you're already in or bound for.
+    const bearing = (n) => {
+      tmp.copy(n.pos).sub(pos)
+      return (wrapAngle(Math.atan2(-tmp.x, -tmp.z) - aimYaw) + Math.PI * 2) % (Math.PI * 2)
+    }
+    const nearest = list.reduce((a, b) => (a.pos.distanceTo(pos) < b.pos.distanceTo(pos) ? a : b))
+    const here = nearest.pos.distanceTo(pos) < nearest.radius * 1.5 + 60 ? nearest.name : null
+    const choices = list.filter((n) => n.name !== here).sort((a, b) => bearing(a) - bearing(b))
+    if (!choices.length) return
+    const i = current ? (choices.findIndex((n) => n.name === current) + 1) % choices.length : 0
+    flyToSystem(choices[i].name)
+    return choices[i].name
+  }
+
+  /** Drag to aim. Pixels of pointer movement. */
+  function look(dx, dy) {
+    if (!active || landed) return
+    if (autopilot) autopilot = null
+    aimYaw = wrapAngle(aimYaw - dx * 0.0042)
+    aimPitch = Math.max(-1.2, Math.min(1.2, aimPitch - dy * 0.0036))
+    lastLook = time
+  }
+
+  /** On-screen controls: any of thrust, turn, climb (−1…1) and boost (0/1). */
+  function setTouch(next) {
+    Object.assign(touch, next)
+    if ((next.thrust || next.turn || next.climb) && autopilot) autopilot = null
+    if (landed && (next.thrust > 0.3 || Math.abs(next.climb || 0) > 0.3) && seq?.kind !== 'ult') liftOff()
+  }
+
+  function landOrLiftOff() {
+    if (!active || seq?.kind === 'ult') return
+    if (landed) liftOff()
+    else if (near) land(near.id)
+  }
+
   // ── input ───────────────────────────────────────────────────────────────────────────
   const CONTROL = new Set(['w', 's', 'a', 'd', 'r', 'f', 'arrowup', 'arrowdown', 'arrowleft', 'arrowright', 'shift'])
 
@@ -500,8 +572,12 @@ export function createFlyer(stage, web, hooks = {}) {
     }
     if (!down) return false
     if (key === 'e' || key === 'enter') {
-      if (landed) liftOff()
-      else if (near) land(near.id)
+      landOrLiftOff()
+      return true
+    }
+    if (key === 'q') {
+      const name = nextSystem()
+      if (name) hooks.onHeading?.(name)
       return true
     }
     if (key === 'escape') {
@@ -536,27 +612,42 @@ export function createFlyer(stage, web, hooks = {}) {
   function step(dt) {
     time += dt
     const held = (...list) => list.some((x) => keys.has(x))
-    let wantThrust = (held('w', 'arrowup') ? 1 : 0) - (held('s', 'arrowdown') ? 1 : 0)
-    let wantTurn = (held('a', 'arrowleft') ? 1 : 0) - (held('d', 'arrowright') ? 1 : 0)
-    let wantClimb = (held('r') ? 1 : 0) - (held('f') ? 1 : 0)
-    let wantBoost = held('shift') ? 1 : 0
+    const clamp1 = (v) => Math.max(-1, Math.min(1, v))
+    let wantThrust = clamp1((held('w', 'arrowup') ? 1 : 0) - (held('s', 'arrowdown') ? 1 : 0) + touch.thrust)
+    let wantTurn = clamp1((held('a', 'arrowleft') ? 1 : 0) - (held('d', 'arrowright') ? 1 : 0) + touch.turn)
+    let wantClimb = clamp1((held('r') ? 1 : 0) - (held('f') ? 1 : 0) + touch.climb)
+    let wantBoost = held('shift') || touch.boost ? 1 : 0
 
     if (landed && !seq && !worldOf(landed)) liftOff()
 
     let approach = null
     if (autopilot) {
-      const t = worldOf(autopilot)
-      if (!t) autopilot = null
+      const toSystem = typeof autopilot === 'object'
+      const t = toSystem ? null : worldOf(autopilot)
+      const goal = toSystem ? autopilot.point : t?.world
+      if (!goal) autopilot = null
       else {
-        tmp.copy(t.world).sub(pos)
+        tmp.copy(goal).sub(pos)
         const dist = tmp.length()
-        const diff = wrapAngle(Math.atan2(-tmp.x, -tmp.z) - yaw)
-        wantTurn = Math.max(-1, Math.min(1, diff * 1.6))
+        // Aim at it, the same way you would by hand, so the view shows where you're going.
+        const diff = wrapAngle(Math.atan2(-tmp.x, -tmp.z) - aimYaw)
+        aimYaw = wrapAngle(aimYaw + diff * k(2.4, dt))
+        aimPitch += (Math.max(-0.9, Math.min(0.9, Math.asin(tmp.y / Math.max(dist, 0.001)))) - aimPitch) * k(2, dt)
+        wantTurn = 0
+        wantClimb = 0
         wantThrust = Math.max(0, Math.cos(diff)) * Math.min(1, dist / 25)
-        wantClimb = Math.max(-1, Math.min(1, tmp.y / 12))
         // Long trips power up on their own, so a far-off task is a short, bright flight away.
         if (dist > 45) wantBoost = 1
-        if (dist < (t.size || 1) * 5 + 4) land(autopilot)
+        if (toSystem) {
+          const n = web.nodes.get(autopilot.name)
+          const stopAt = (n ? n.radius * 1.5 : 6) + 70
+          if (dist < stopAt) {
+            hooks.onArrive?.(autopilot.name)
+            autopilot = null
+          } else if (dist < stopAt + 40) {
+            approach = tmp.clone().normalize().multiplyScalar(Math.min(26, (dist - stopAt) * 1.1 + 3))
+          }
+        } else if (dist < (t.size || 1) * 5 + 4) land(autopilot)
         else if (dist < 40) approach = tmp.clone().normalize().multiplyScalar(Math.min(30, dist * 1.2 + 4))
       }
     }
@@ -574,10 +665,29 @@ export function createFlyer(stage, web, hooks = {}) {
     const maxSpeed = 24 * boost
     const speedFrac = Math.min(1, speed / 30)
 
-    // Turning: wider, calmer arcs at speed.
-    const yawTarget = input.turn * (1.25 - speedFrac * 0.5)
-    yawVel += (yawTarget - yawVel) * k(3, dt)
-    yaw = wrapAngle(yaw + yawVel * dt)
+    // Aim: A/D swing it round (wider, calmer arcs at speed); dragging moves it directly (see look).
+    aimYaw = wrapAngle(aimYaw + input.turn * (1.5 - speedFrac * 0.5) * dt)
+    // Leave the view alone and it eases back to level, so you never end up flying upside-down-ish.
+    if (!autopilot && time - lastLook > 1.4) aimPitch *= Math.exp(-dt * 0.45)
+
+    // A gentle pull back toward the systems if you drift far out into empty space.
+    if (!autopilot && web.center) {
+      const { point, extent } = web.center()
+      tmp2.copy(point).sub(pos)
+      const out = tmp2.length() - (extent + 260)
+      if (out > 0) {
+        aimYaw = wrapAngle(aimYaw + wrapAngle(Math.atan2(-tmp2.x, -tmp2.z) - aimYaw) * k(Math.min(1.2, out / 150), dt))
+        aimPitch += (Math.asin(Math.max(-1, Math.min(1, tmp2.y / tmp2.length()))) * 0.6 - aimPitch) * k(0.6, dt)
+        if (!leashed) hooks.onLeash?.()
+        leashed = true
+      } else if (out < -60) leashed = false
+    }
+    dirOf(aimYaw, aimPitch, aimDir)
+
+    // The body turns to face where you aim; its turning rate is what banks it.
+    const before = yaw
+    yaw = wrapAngle(yaw + wrapAngle(aimYaw - yaw) * k(6, dt))
+    yawVel += (wrapAngle(yaw - before) / Math.max(dt, 1e-4) - yawVel) * k(8, dt)
     forwardOf(yaw, forward)
 
     if (landed) {
@@ -595,6 +705,8 @@ export function createFlyer(stage, web, hooks = {}) {
       pos.addScaledVector(vel, dt)
       tmp.copy(t.world).sub(pos)
       yaw = wrapAngle(yaw + wrapAngle(Math.atan2(-tmp.x, -tmp.z) - yaw) * k(1.5, dt))
+      aimYaw = yaw
+      aimPitch *= 1 - k(2, dt)
       yawVel *= 1 - k(4, dt)
       forwardOf(yaw, forward)
       return
@@ -603,20 +715,18 @@ export function createFlyer(stage, web, hooks = {}) {
     if (approach) {
       vel.lerp(approach, k(2.5, dt))
     } else {
-      // Carve: when flying forward, the path bends to follow where you face instead of skidding.
-      const hSpeed = Math.hypot(vel.x, vel.z)
-      if (hSpeed > 0.5 && input.thrust > 0.05) {
-        const heading = Math.atan2(-vel.x, -vel.z)
-        const turned = heading + wrapAngle(yaw - heading) * k(2.4 * input.thrust, dt)
-        vel.x = -Math.sin(turned) * hSpeed
-        vel.z = -Math.cos(turned) * hSpeed
+      // Carve: while flying forward, your path bends toward where you aim — up and down as well as
+      // left and right — instead of skidding sideways.
+      if (speed > 0.5 && input.thrust > 0.05) {
+        tmp2.copy(vel).divideScalar(speed).lerp(aimDir, k(3 * input.thrust, dt)).normalize()
+        vel.copy(tmp2).multiplyScalar(speed)
       }
-      vel.addScaledVector(forward, input.thrust * 13 * boost * dt)
+      vel.addScaledVector(aimDir, input.thrust * 13 * boost * dt)
       vel.y += input.climb * 9 * (1 + input.boost * 0.8) * dt
       // Drift to a gentle stop: stronger drag when nothing's held.
       const idle = 1 - Math.min(1, Math.abs(input.thrust) + Math.abs(input.climb))
       vel.multiplyScalar(Math.exp(-dt * (0.3 + idle * 0.55)))
-      vel.y *= Math.exp(-dt * (Math.abs(input.climb) < 0.1 ? 1.2 : 0))
+      if (Math.abs(input.climb) < 0.1 && input.thrust < 0.05) vel.y *= Math.exp(-dt * 1.2)
       if (speed > maxSpeed) vel.multiplyScalar(1 - k(2, dt) * (1 - maxSpeed / speed))
     }
 
@@ -670,7 +780,8 @@ export function createFlyer(stage, web, hooks = {}) {
     joints.shoulderL.rotation.x += calm * Math.sin(time * 1.1) * 0.035
     root.position.set(pos.x, pos.y + bob, pos.z)
     root.rotation.set(0, yaw, 0)
-    body.rotation.set(pose.pitch, 0, bank)
+    bodyPitch += ((landed ? 0 : aimPitch * s * 0.9) - bodyPitch) * kk(4)
+    body.rotation.set(pose.pitch + bodyPitch, 0, bank)
     body.position.y = 0.25 * (1 - Math.cos(pose.pitch))
 
     // Cloth: hangs back and sways when still, streams out and flutters when flying.
@@ -774,15 +885,23 @@ export function createFlyer(stage, web, hooks = {}) {
       smoothDamp(lookOffset, tmp.copy(t.world).sub(pos).multiplyScalar(seq ? 0.5 : 0.45).addScaledVector(UP, seq?.kind === 'bomb' ? 0.5 : 0), lookOffsetVel, 0.7, dt)
       camYaw = yaw
     } else {
-      camYaw = wrapAngle(camYaw + wrapAngle(yaw - camYaw) * kk(2.2))
+      // Locked to your aim, lightly smoothed: the view is always where you're about to go.
+      camYaw = wrapAngle(camYaw + wrapAngle(aimYaw - camYaw) * kk(9))
+      camPitch += (aimPitch - camPitch) * kk(9)
       const reach = chase * (1 + power * 0.3)
-      const back = forwardOf(camYaw, tmp)
-      const want = tmp2.copy(back).multiplyScalar(-reach * (1 - s * 0.25)).addScaledVector(UP, reach * (0.22 + s * 0.4) + 0.3)
-      smoothDamp(camOffset, want, camOffsetVel, 0.45, dt)
-      smoothDamp(lookOffset, back.multiplyScalar(reach * 0.12).addScaledVector(UP, 0.05 + s * 0.25), lookOffsetVel, 0.3, dt)
+      const view = dirOf(camYaw, camPitch * 0.85, tmp)
+      const want = tmp2.copy(view).multiplyScalar(-reach).addScaledVector(UP, reach * 0.2 + 0.35)
+      smoothDamp(camOffset, want, camOffsetVel, 0.16, dt)
+      smoothDamp(lookOffset, view.multiplyScalar(reach * 0.55).addScaledVector(UP, 0.25), lookOffsetVel, 0.12, dt)
     }
     camera.position.copy(pos).add(camOffset)
     camera.lookAt(tmp.copy(pos).add(lookOffset))
+    // A slightly wider view at speed, so motion reads and more of the sky stays in frame.
+    const fov = BASE_FOV + (landed ? 0 : Math.min(1, speed / 55) * 10 + input.boost * 4)
+    if (Math.abs(camera.fov - fov) > 0.05) {
+      camera.fov += (fov - camera.fov) * kk(3)
+      camera.updateProjectionMatrix()
+    }
     if (shake > 0.001) {
       shake *= Math.exp(-dt * 4)
       camera.position.x += (Math.random() - 0.5) * shake
@@ -930,6 +1049,15 @@ export function createFlyer(stage, web, hooks = {}) {
     enter,
     exit,
     ultimate,
+    look,
+    setTouch,
+    landOrLiftOff,
+    nextSystem,
+    flyToSystem,
+    /** What the radar and the edge markers need to know. */
+    get nav() {
+      return { pos, aimYaw, heading: typeof autopilot === 'object' && autopilot ? autopilot.name : null, landed }
+    },
     toggle: () => (active ? exit() : enter()),
     autopilotTo,
     handleKey,

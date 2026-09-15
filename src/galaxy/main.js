@@ -240,6 +240,28 @@ const actions = {
     flyer.toggle()
   },
 
+  // Touch controls while flying.
+  touchInput(v) {
+    flyer.setTouch(v)
+  },
+  touchHold(name, on) {
+    if (name === 'climb') flyer.setTouch({ climb: on ? 1 : 0 })
+    if (name === 'sink') flyer.setTouch({ climb: on ? -1 : 0 })
+    if (name === 'boost') flyer.setTouch({ boost: on ? 1 : 0 })
+  },
+  touchTap(name) {
+    if (name === 'land') flyer.landOrLiftOff()
+    if (name === 'next') {
+      const to = flyer.nextSystem()
+      if (to) ui.toast(`Heading to ${to}`)
+    }
+  },
+  flyToSystem(name) {
+    if (!flyer.active) return actions.focusNode(name)
+    flyer.flyToSystem(name)
+    ui.toast(`Heading to ${name}`)
+  },
+
   toggleSound() {
     soundWanted = !hum.on
     if (soundWanted) hum.start()
@@ -277,6 +299,7 @@ const actions = {
   setSetting(name, value) {
     if (name === 'bloom') quality.bloom = value === 'on'
     if (name === 'detail' && DETAIL_RATIO[value]) quality.detail = value
+    if (name === 'touch' && ['auto', 'on', 'off'].includes(value)) quality.touch = value
     applyQuality()
     try {
       localStorage.setItem(QUALITY_KEY, JSON.stringify(quality))
@@ -296,6 +319,8 @@ const hum = createHum()
 const flyer = createFlyer(stage, web, {
   onChange(on) {
     ui.setFlight(on)
+    ui.setNav(on)
+    applyTouch()
     if (on) {
       if (soundWanted) hum.start()
       ui.setSound(soundWanted && hum.on)
@@ -320,6 +345,9 @@ const flyer = createFlyer(stage, web, {
   onCharge: (seconds, strength) => hum.charge(seconds, strength),
   onBoom: (strength) => hum.boom(strength),
   onFlash: (strength, color) => ui.flash(strength, color),
+  onHeading: (name) => ui.toast(`Heading to ${name}`),
+  onArrive: (name) => ui.toast(`Arrived at ${name}`),
+  onLeash: () => ui.toast('Turning back toward your systems'),
 })
 if (import.meta.env?.DEV) Object.assign(window.__galaxy, { flyer, actions, ui })
 
@@ -348,9 +376,21 @@ let quality = { bloom: true, detail: innerWidth < 760 ? 'balanced' : 'high' }
 try {
   quality = { ...quality, ...JSON.parse(localStorage.getItem(QUALITY_KEY) || '{}') }
 } catch {}
+/**
+ * Touch controls show while flying when they're switched on, or on Auto when this looks like a
+ * touch device that hasn't used a keyboard yet.
+ */
+let keyboardSeen = false
+const coarsePointer = matchMedia('(pointer: coarse)').matches
+function applyTouch() {
+  const mode = quality.touch || 'auto'
+  ui.setTouch(flyer.active && (mode === 'on' || (mode === 'auto' && coarsePointer && !keyboardSeen)))
+}
+
 function applyQuality() {
   stage.setQuality({ bloom: quality.bloom, pixelRatio: DETAIL_RATIO[quality.detail] || 2 })
   ui.setSettings(quality)
+  applyTouch()
 }
 applyQuality()
 
@@ -496,6 +536,14 @@ addEventListener(
 addEventListener('pointermove', (e) => {
   if (press) {
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_THRESHOLD) press.moved = true
+    // Flying: dragging the sky aims the view.
+    if (flyer.active && press.moved) {
+      flyer.look(e.clientX - (press.lx ?? press.x), e.clientY - (press.ly ?? press.y))
+      press.lx = e.clientX
+      press.ly = e.clientY
+      canvas.className = 'g-canvas drag'
+      return
+    }
     if (press.hit && press.moved && !flyer.active) {
       if (!press.dragging) press.dragging = web.beginDrag(press.hit.kind, press.hit.id)
       const pos = web.dragTo(press.hit.kind, press.hit.id, e.clientX, e.clientY, stage.uniforms.uTime.value)
@@ -567,6 +615,11 @@ async function moveThought(id, nodeName) {
 
 let cursor = -1
 addEventListener('keyup', (e) => flyer.handleKey(e, false))
+addEventListener('keydown', () => {
+  if (keyboardSeen) return
+  keyboardSeen = true
+  applyTouch()
+})
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select')) return
   const key = e.key.toLowerCase()
@@ -635,6 +688,10 @@ function tick(now) {
   web.update(dt, stage.uniforms.uTime.value)
   flyer.update(dt)
   stage.render(dt)
+  if (flyer.active && frames % 2 === 0) {
+    ui.drawRadar(web, flyer.nav)
+    ui.placeBeacons(web, stage.camera, flyer.nav)
+  }
   ui.placeLabels(web, focusNode)
   if (selected) flyer.landed ? ui.dockCard() : ui.placeCard(web, selected)
   ui.frame(dt)
