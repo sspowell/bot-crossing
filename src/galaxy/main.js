@@ -30,6 +30,10 @@ let focusNode = null
 let filterId = 'all'
 /** One-thought-at-a-time mode: a queue of the loudest thoughts and where we are in it. */
 let focus = null
+/** The last task the dice landed on, so a reroll always shows something new. */
+let lastRandom = null
+/** What the current filter chip lets through, or null for everything. */
+let filterTest = null
 
 const post = async (url, payload) => {
   const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
@@ -167,6 +171,24 @@ const actions = {
     flyHome()
   },
 
+  /**
+   * Roll the dice: fly to one open task picked at random. It respects what you're looking at — a
+   * focused system picks from that list, an active filter picks from what the filter shows — and
+   * never lands on the same task twice in a row. It only picks; completing it is still your call.
+   */
+  pickRandom() {
+    if (focus) actions.exitFocus()
+    let pool = [...web.thoughts.values()].filter(
+      (t) => !t.leaving && t.dissolving === null && (!focusNode || t.node === focusNode) && (!filterTest || filterTest(t))
+    )
+    if (!pool.length) return ui.toast(focusNode ? `Nothing open in ${focusNode}.` : 'Nothing open to pick from.')
+    if (pool.length > 1) pool = pool.filter((t) => t.id !== lastRandom)
+    const t = pool[Math.floor(Math.random() * pool.length)]
+    lastRandom = t.id
+    actions.selectThought(t.id)
+    ui.toast(`The dice picked “${t.thread.title}”`)
+  },
+
   openCapture() {
     if (!writable()) return ui.toast('Capturing is off — run the TickTick login with --write.', 'err')
     const lists = [...new Set(threads.map((t) => t.project))]
@@ -239,9 +261,11 @@ function apply(list) {
   threads = list.filter((t) => !t.archived)
   const galaxy = (state.galaxy ||= {})
   let placedNew = false
-  // Saved spots from the old star-web layout mean something else now: clear them once.
+  // Saved spots from an older layout mean something else now: clear them once. Planet orbits from
+  // any solar layout are still good — only the suns get re-placed.
   if (stateLoaded && galaxy.layout !== LAYOUT_VERSION) {
-    for (const key of Object.keys(galaxy)) if (key.startsWith('node:') || key.startsWith('thought:')) delete galaxy[key]
+    const keepOrbits = /^(solar|galaxy-arms)-/.test(galaxy.layout || '')
+    for (const key of Object.keys(galaxy)) if (key.startsWith('node:') || (!keepOrbits && key.startsWith('thought:'))) delete galaxy[key]
     galaxy.layout = LAYOUT_VERSION
     placedNew = true
   }
@@ -297,6 +321,7 @@ function applyFilter() {
     const ids = new Set(web.tagLinks.flatMap((l) => [l.a, l.b]))
     test = (t) => ids.has(t.id)
   }
+  filterTest = test
   web.setFilter(test)
   ui.setFilter(filterId)
 }
@@ -453,6 +478,8 @@ addEventListener('keydown', (e) => {
     actions.selectThought(wants[cursor].id)
   } else if (key === 'f') {
     actions.enterFocus()
+  } else if (key === 'd') {
+    actions.pickRandom()
   } else if (key === 'c') {
     e.preventDefault()
     actions.openCapture()

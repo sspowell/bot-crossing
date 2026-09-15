@@ -8,7 +8,7 @@
  */
 
 /** Bumped when the meaning of saved positions changes, so old spots are cleared once. */
-export const LAYOUT_VERSION = 'solar-1'
+export const LAYOUT_VERSION = 'solar-3'
 
 /** FNV-1a — stable across sessions and machines, which is the whole point. */
 export function hashString(s) {
@@ -32,8 +32,8 @@ export function seeded(seed) {
   }
 }
 
-/** Far enough apart that the outermost orbits of two systems never touch. */
-const SYSTEM_GAP = 135
+/** Close enough that neighbouring systems' outer dust mingles, so they read as one web rather than islands. */
+const SYSTEM_GAP = 108
 const GOLDEN_ANGLE = 2.399963
 
 /**
@@ -43,13 +43,13 @@ const GOLDEN_ANGLE = 2.399963
 export function placeNode(name, taken) {
   const r = seeded(hashString(`node:${name}`))
   let angle = r() * Math.PI * 2
-  let radius = 90 + r() * 80
-  const lift = (r() - 0.5) * 70
+  let radius = 30 + r() * 50
+  const lift = (r() - 0.5) * 40
   for (let i = 0; i < 400; i++) {
     const p = [Math.cos(angle) * radius, lift, Math.sin(angle) * radius]
     if (taken.every((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) >= SYSTEM_GAP)) return p
     angle += GOLDEN_ANGLE
-    radius += 9
+    radius += 6
   }
   return [Math.cos(angle) * radius, lift, Math.sin(angle) * radius]
 }

@@ -43,6 +43,7 @@ export function createUi(root, actions) {
       <div class="g-actions">
         <button class="g-action capture" data-act="openCapture" hidden title="Add a thought (C)">＋ thought</button>
         <button class="g-action focus" data-act="enterFocus" title="One thought at a time (F)">Focus</button>
+        <button class="g-action roll" data-act="pickRandom" title="Pick a random task (D)">Random</button>
         <button class="g-action gear" data-act="toggleSettings" aria-label="Display settings" title="Display settings">⚙</button>
       </div>
     </header>
@@ -92,7 +93,7 @@ export function createUi(root, actions) {
     </aside>
 
     <nav class="g-filters" aria-label="Filter thoughts"></nav>
-    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
+    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>D</kbd> random · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
     <a class="g-colony" href="/colony">colony view ↗</a>
     <div class="g-toast" role="status"></div>
     <div class="g-empty" hidden>

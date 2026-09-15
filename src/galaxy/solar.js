@@ -661,13 +661,14 @@ export function createWeb(stage) {
   }
 
   /**
-   * Everything is connected: a minimum spanning tree ties every sun into one web, and any two
-   * systems whose tasks share tags get a filament too — brighter the more they share.
+   * Everything is connected: a minimum spanning tree ties every sun into one web, each sun also
+   * reaches for its two nearest neighbours so the web has loops rather than a single chain, and any
+   * two systems whose tasks share tags get a filament too — brighter the more they share.
    */
   function buildFilaments() {
     const list = [...nodes.values()].filter((n) => !n.leaving)
     const shared = new Map()
-    const key = (a, b) => (a < b ? `${a} ${b}` : `${b} ${a}`)
+    const key = (a, b) => (a < b ? `${a}\u0000${b}` : `${b}\u0000${a}`)
     for (const l of tagLinks) {
       const a = thoughts.get(l.a)?.node
       const b = thoughts.get(l.b)?.node
@@ -690,8 +691,12 @@ export function createWeb(stage) {
         edges.set(key(best.a, best.b), { a: best.a, b: best.b })
       }
     }
+    for (const a of list) {
+      const near = list.filter((b) => b !== a).sort((x, y) => a.pos.distanceTo(x.pos) - a.pos.distanceTo(y.pos)).slice(0, 2)
+      for (const b of near) edges.set(key(a.name, b.name), { a: a.name, b: b.name })
+    }
     for (const k of shared.keys()) {
-      const [a, b] = k.split(' ')
+      const [a, b] = k.split('\u0000')
       edges.set(k, { a, b })
     }
     filaments = [...edges.entries()].map(([k, e], i) => ({ ...e, shared: shared.get(k) || 0, seed: (i * 0.618) % 1 }))
@@ -1016,7 +1021,7 @@ export function createWeb(stage) {
       const b = nodes.get(f.b)
       if (!a || !b) continue
       const dim = Math.min(a.glow, b.glow, 1) * Math.min(a.arrive, b.arrive)
-      const base = (0.035 + Math.min(4, f.shared) * 0.03) * dim
+      const base = (0.08 + Math.min(4, f.shared) * 0.04) * dim
       const lift = a.pos.distanceTo(b.pos) * 0.1
       const p = reducedMotion ? -1 : (time * 0.05 + f.seed) % 1
       for (let i = 0; i < FILAMENT_SEGMENTS; i++) {
