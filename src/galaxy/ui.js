@@ -44,6 +44,7 @@ export function createUi(root, actions) {
         <button class="g-action capture" data-act="openCapture" hidden title="Add a thought (C)">＋ thought</button>
         <button class="g-action focus" data-act="enterFocus" title="One thought at a time (F)">Focus</button>
         <button class="g-action roll" data-act="pickRandom" title="Pick a random task (D)">Random</button>
+        <button class="g-action fly" data-act="toggleFlight" title="Take flight (V)">Fly</button>
         <button class="g-action gear" data-act="toggleSettings" aria-label="Display settings" title="Display settings">⚙</button>
       </div>
     </header>
@@ -93,7 +94,15 @@ export function createUi(root, actions) {
     </aside>
 
     <nav class="g-filters" aria-label="Filter thoughts"></nav>
-    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>D</kbd> random · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
+    <div class="g-flight" hidden>
+      <div class="g-flight-near" aria-live="polite"></div>
+      <div class="g-flight-keys"><kbd>W</kbd><kbd>S</kbd> fly · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>R</kbd><kbd>F</kbd> rise / sink · <kbd>Shift</kbd> power up · <kbd>E</kbd> land · click a world to fly there · <kbd>Esc</kbd> stop</div>
+      <div class="g-flight-row">
+        <button class="g-chip g-flight-sound" data-act="toggleSound">Sound off</button>
+        <button class="g-chip" data-act="toggleFlight">Stop flying</button>
+      </div>
+    </div>
+    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>D</kbd> random · <kbd>V</kbd> fly · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
     <a class="g-colony" href="/colony">colony view ↗</a>
     <div class="g-toast" role="status"></div>
     <div class="g-empty" hidden>
@@ -200,6 +209,33 @@ export function createUi(root, actions) {
     text.textContent = delta < 0 ? `${-delta} fewer tangled` : delta > 0 ? `${delta} more tangled` : 'holding steady'
     el.classList.toggle('better', delta < 0)
     el.classList.toggle('worse', delta > 0)
+  }
+
+  function setFlight(on) {
+    $('.g-flight').hidden = !on
+    root.classList.toggle('flight-mode', on)
+    $('.g-action.fly').textContent = on ? 'Stop flying' : 'Fly'
+    if (!on) setFlightNear(null)
+  }
+
+  /** What you're flying beside: a world you could land on, or the one you're sitting with. */
+  function setFlightNear(info) {
+    const el = $('.g-flight-near')
+    if (!info) {
+      el.className = 'g-flight-near'
+      el.textContent = ''
+      return
+    }
+    const { thought, landed } = info
+    el.className = `g-flight-near show ${thought.state}`
+    el.innerHTML = landed
+      ? `Sitting with <b>${esc(thought.thread.title)}</b> · <kbd>E</kbd> or <kbd>W</kbd> to fly on`
+      : `<kbd>E</kbd> land beside <b>${esc(thought.thread.title)}</b>`
+  }
+
+  function setSound(on) {
+    $('.g-flight-sound').textContent = on ? 'Sound on' : 'Sound off'
+    $('.g-flight-sound').classList.toggle('on', on)
   }
 
   function setFocus(info) {
@@ -336,6 +372,17 @@ export function createUi(root, actions) {
     card.style.opacity = s.visible ? '1' : '0'
   }
 
+  /** While sitting with a task in flight, the card waits at the right edge, clear of you and the world. */
+  function dockCard() {
+    if (card.hidden) return
+    const w = card.offsetWidth || 320
+    const h = card.offsetHeight || 200
+    const x = innerWidth > 760 ? innerWidth - w - 32 : 16
+    const y = innerWidth > 760 ? Math.max(84, innerHeight / 2 - h / 2) : 84
+    card.style.transform = `translate3d(${x}px, ${y}px, 0)`
+    card.style.opacity = '1'
+  }
+
   let panelSig = ''
   function fillPanel(web, name) {
     if (!name) {
@@ -382,8 +429,8 @@ export function createUi(root, actions) {
   }
 
   return {
-    setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, fillPanel, toast, frame, card, panel,
-    openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus,
+    setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, dockCard, fillPanel, toast, frame, card, panel,
+    openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus, setFlight, setFlightNear, setSound,
     get capturing() {
       return !captureForm.hidden
     },

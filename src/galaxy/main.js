@@ -9,6 +9,8 @@ import './styles.css'
 import { createScene } from './scene.js'
 import { createWeb, stateOf } from './solar.js'
 import { createUi, FILTERS } from './ui.js'
+import { createFlyer } from './flyer.js'
+import { createHum } from './hum.js'
 import { placeNode, thoughtOffset, phaseOf, hueOf, LAYOUT_VERSION } from './layout.js'
 import { fetchThreads, fetchState, saveState, openThread } from '../game/api.js'
 
@@ -77,6 +79,8 @@ const actions = {
   selectThought(id) {
     const t = web.thoughts.get(id)
     if (!t) return
+    // While flying, choosing a task means flying there — the card opens when you land.
+    if (flyer.active) return flyer.autopilotTo(id)
     selected = id
     web.setSelected(id)
     ui.fillCard(web, id)
@@ -85,6 +89,7 @@ const actions = {
 
   close() {
     stage.stopFollowing()
+    flyer.liftOff()
     selected = null
     web.setSelected(null)
     ui.card.hidden = true
@@ -138,6 +143,7 @@ const actions = {
   // One thought at a time — the loudest first: most overdue, then due today, heavier before lighter.
   enterFocus() {
     if (focus) return actions.exitFocus()
+    if (flyer.active) flyer.exit()
     const queue = [...web.thoughts.values()]
       .filter((t) => t.state !== 'drifting' && !t.leaving && t.dissolving === null)
       .sort((a, b) =>
@@ -189,6 +195,26 @@ const actions = {
     ui.toast(`The dice picked “${t.thread.title}”`)
   },
 
+  toggleFlight() {
+    if (!flyer.active) {
+      if (focus) actions.exitFocus()
+      if (focusNode) actions.unfocus({ fly: false })
+      actions.close()
+      ui.toggleSettings(false)
+    }
+    flyer.toggle()
+  },
+
+  toggleSound() {
+    soundWanted = !hum.on
+    if (soundWanted) hum.start()
+    else hum.stop()
+    ui.setSound(soundWanted)
+    try {
+      localStorage.setItem(SOUND_KEY, soundWanted ? 'on' : 'off')
+    } catch {}
+  },
+
   openCapture() {
     if (!writable()) return ui.toast('Capturing is off — run the TickTick login with --write.', 'err')
     const lists = [...new Set(threads.map((t) => t.project))]
@@ -224,6 +250,40 @@ const actions = {
 }
 
 const ui = createUi(root, actions)
+
+// ── flying ──────────────────────────────────────────────────────────────────────────
+const SOUND_KEY = 'galaxy-flight-sound'
+let soundWanted = true
+try {
+  soundWanted = localStorage.getItem(SOUND_KEY) !== 'off'
+} catch {}
+const hum = createHum()
+const flyer = createFlyer(stage, web, {
+  onChange(on) {
+    ui.setFlight(on)
+    if (on) {
+      if (soundWanted) hum.start()
+      ui.setSound(soundWanted && hum.on)
+      ui.toast('You’re airborne — W to fly, Shift to power up, click a world to fly there')
+    } else {
+      hum.stop()
+      flyHome()
+    }
+  },
+  onNear: (info) => ui.setFlightNear(info),
+  onLand(id) {
+    selected = id
+    web.setSelected(id)
+    ui.fillCard(web, id)
+  },
+  onLeave() {
+    selected = null
+    web.setSelected(null)
+    ui.card.hidden = true
+  },
+  onSpeed: (v) => hum.setSpeed(v),
+})
+if (import.meta.env?.DEV) Object.assign(window.__galaxy, { flyer, actions, ui })
 
 /** Pull back far enough to take in every system at once. */
 function flyHome() {
@@ -398,7 +458,7 @@ addEventListener(
 addEventListener('pointermove', (e) => {
   if (press) {
     if (Math.hypot(e.clientX - press.x, e.clientY - press.y) > DRAG_THRESHOLD) press.moved = true
-    if (press.hit && press.moved) {
+    if (press.hit && press.moved && !flyer.active) {
       if (!press.dragging) press.dragging = web.beginDrag(press.hit.kind, press.hit.id)
       const pos = web.dragTo(press.hit.kind, press.hit.id, e.clientX, e.clientY, stage.uniforms.uTime.value)
       if (pos) state.galaxy[`${press.hit.kind}:${press.hit.id}`] = pos
@@ -418,11 +478,19 @@ addEventListener('pointermove', (e) => {
   canvas.className = h ? 'g-canvas point' : 'g-canvas grab'
 })
 
+addEventListener(
+  'wheel',
+  (e) => {
+    if (flyer.active && e.target === canvas) flyer.zoom(e.deltaY)
+  },
+  { passive: true }
+)
+
 addEventListener('pointerup', () => {
   if (!press) return
   const { hit, dragging, moved } = press
   press = null
-  stage.controls.enabled = true
+  stage.controls.enabled = !flyer.active
   if (dragging) {
     const target = web.endDrag(hit.kind, hit.id)
     if (target) return moveThought(hit.id, target)
@@ -432,6 +500,7 @@ addEventListener('pointerup', () => {
   }
   if (moved) return
   if (hit?.kind === 'thought') actions.selectThought(hit.id)
+  else if (flyer.active) return
   else if (hit?.kind === 'node') actions.focusNode(hit.id)
   else if (selected && !focus) actions.close()
 })
@@ -459,15 +528,28 @@ async function moveThought(id, nodeName) {
 }
 
 let cursor = -1
+addEventListener('keyup', (e) => flyer.handleKey(e, false))
 addEventListener('keydown', (e) => {
   if (e.target.closest?.('input, textarea, select')) return
   const key = e.key.toLowerCase()
+  if (flyer.active) {
+    if (ui.capturing && e.key === 'Escape') return ui.closeCapture()
+    if (flyer.handleKey(e, true)) return
+    if (key === 'v') return actions.toggleFlight()
+    if (key === 'c') {
+      e.preventDefault()
+      actions.openCapture()
+    }
+    return
+  }
   if (e.key === 'Escape') {
     if (ui.capturing) ui.closeCapture()
     else if (focus) actions.exitFocus()
     else if (selected) actions.close()
     else if (focusNode) actions.unfocus()
     ui.toggleSettings(false)
+  } else if (key === 'v') {
+    actions.toggleFlight()
   } else if (key === 'n' && !focus) {
     // Tangled first, then asking — the loudest thing wins.
     const wants = [...web.thoughts.values()]
@@ -501,7 +583,7 @@ function tick(now) {
   last = now
   // Nobody touching it and nothing in motion: drift at 30fps instead of burning a full frame rate
   // on a screen left open.
-  const idle = now - lastInput > IDLE_AFTER_MS && !stage.flying && !press && !focus
+  const idle = now - lastInput > IDLE_AFTER_MS && !stage.flying && !press && !focus && !flyer.active
   if (idle && pending < 1 / 30) {
     requestAnimationFrame(tick)
     return
@@ -509,9 +591,10 @@ function tick(now) {
   const dt = Math.min(0.05, pending)
   pending = 0
   web.update(dt, stage.uniforms.uTime.value)
+  flyer.update(dt)
   stage.render(dt)
   ui.placeLabels(web, focusNode)
-  if (selected) ui.placeCard(web, selected)
+  if (selected) flyer.landed ? ui.dockCard() : ui.placeCard(web, selected)
   ui.frame(dt)
   if (++frames % 60 === 0) ui.syncLabels(web)
   requestAnimationFrame(tick)

@@ -17,6 +17,9 @@ import { sunRadiusOf } from './layout.js'
  *   gold aurora    due today — asking for you
  *   a filament     two systems joined: every sun is linked into one web, and links carrying
  *                  shared tags burn brighter
+ *   a dust stream  the same link made of matter — dust flowing out of each system toward its
+ *                  neighbour, thick where it leaves a sun and thinning to a thread in between,
+ *                  so the systems touch without merging
  *   a light thread two tasks in different lists sharing a tag — the tangle itself
  *
  * One draw per kind: all suns are one instanced mesh, all planets another, all moons, rings,
@@ -376,6 +379,49 @@ const dustFragment = /* glsl */ `
     gl_FragColor = vec4(vColor * a, 1.0);
   }`
 
+/**
+ * Dust streaming along a link between two suns. Every particle's position is worked out on the GPU
+ * from the two ends, so the stream costs nothing per frame beyond moving those ends.
+ */
+const streamVertex = /* glsl */ `
+  attribute vec3 aStart;
+  attribute vec3 aEnd;
+  attribute vec3 aSpread;   // offset from the centre line, before tapering
+  attribute vec4 aFlow;     // start u, speed, lift, size
+  attribute vec3 aColorA;
+  attribute vec3 aColorB;
+  attribute float aGlow;
+  uniform float uTime;
+  uniform float uPixelRatio;
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    float u = fract(aFlow.x + uTime * aFlow.y);
+    vec3 mid = (aStart + aEnd) * 0.5 + vec3(0.0, aFlow.z, 0.0);
+    float v = 1.0 - u;
+    vec3 p = v * v * aStart + 2.0 * v * u * mid + u * u * aEnd;
+    // Wide where it leaves each system, pinched to a thread in the middle: connected, still separate.
+    float waist = 0.28 + 0.72 * pow(abs(u - 0.5) * 2.0, 1.6);
+    p += aSpread * waist;
+    vec4 mv = modelViewMatrix * vec4(p, 1.0);
+    gl_PointSize = clamp(aFlow.w * uPixelRatio * (300.0 / max(-mv.z, 1.0)), 1.0, 4.5);
+    vColor = mix(aColorA, aColorB, u);
+    // Fade in and out at the ends so the loop is seamless, and dim in the middle.
+    float ends = smoothstep(0.0, 0.08, u) * smoothstep(1.0, 0.92, u);
+    vAlpha = ends * (0.45 + 0.55 * waist) * aGlow;
+    gl_Position = projectionMatrix * mv;
+  }`
+
+const streamFragment = /* glsl */ `
+  varying vec3 vColor;
+  varying float vAlpha;
+  void main() {
+    float d = length(gl_PointCoord - 0.5) * 2.0;
+    float a = smoothstep(1.0, 0.0, d) * vAlpha * 0.32;
+    if (a < 0.003) discard;
+    gl_FragColor = vec4(vColor * a, 1.0);
+  }`
+
 // ── helpers ─────────────────────────────────────────────────────────────────────────
 function instanced(geometry, material, capacity, attrs) {
   const g = geometry.clone()
@@ -520,6 +566,69 @@ export function createWeb(stage) {
   dust.frustumCulled = false
   scene.add(dust)
   let dustSig = ''
+
+  const streamMaterial = new THREE.ShaderMaterial({
+    uniforms, vertexShader: streamVertex, fragmentShader: streamFragment,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  })
+  const streams = new THREE.Points(new THREE.BufferGeometry(), streamMaterial)
+  streams.frustumCulled = false
+  scene.add(streams)
+  let streamSig = ''
+  let streamRanges = []
+
+  /** Rebuild the particles only when the set of links changes; their ends are refreshed every frame. */
+  function rebuildStreams() {
+    const sig = filaments.map((f) => `${f.a}>${f.b}:${f.shared}`).join('|')
+    if (sig === streamSig) return
+    streamSig = sig
+    const per = filaments.map((f) => 900 + Math.min(4, f.shared) * 350)
+    const total = per.reduce((a, b) => a + b, 0)
+    const g = pointGeometry(total, { aStart: 3, aEnd: 3, aSpread: 3, aFlow: 4, aColorA: 3, aColorB: 3, aGlow: 1 })
+    const at = g.attributes
+    let i = 0
+    streamRanges = []
+    filaments.forEach((f, k) => {
+      const rand = mulberry(Math.floor(f.seed * 4294967296) + k)
+      const start = i
+      for (let j = 0; j < per[k]; j++, i++) {
+        // A soft, round cross-section: most dust near the centre line, a little wandering wide.
+        const r = Math.sqrt(-2 * Math.log(Math.max(1e-6, rand()))) * 5.5
+        const th = rand() * Math.PI * 2
+        at.aSpread.array.set([Math.cos(th) * r, Math.sin(th) * r * 0.45, (rand() - 0.5) * r], i * 3)
+        // Half flows each way, so neither system reads as feeding the other.
+        const dir = j % 2 ? 1 : -1
+        at.aFlow.array.set([rand(), (reducedMotion ? 0 : 0.006 + rand() * 0.01) * dir, 0, 0.9 + rand() ** 3 * 2.2], i * 4)
+      }
+      streamRanges.push({ f, start, end: i })
+    })
+    g.setDrawRange(0, total)
+    streams.geometry.dispose()
+    streams.geometry = g
+  }
+
+  function updateStreams() {
+    rebuildStreams()
+    const at = streams.geometry.attributes
+    if (!at.aStart) return
+    for (const { f, start, end } of streamRanges) {
+      const a = nodes.get(f.a)
+      const b = nodes.get(f.b)
+      const glow = a && b ? Math.min(a.glow, b.glow, 1) * Math.min(a.arrive, b.arrive) * (0.8 + Math.min(4, f.shared) * 0.12) : 0
+      const lift = a && b ? a.pos.distanceTo(b.pos) * 0.1 : 0
+      for (let i = start; i < end; i++) {
+        if (a && b) {
+          at.aStart.array.set([a.pos.x, a.pos.y, a.pos.z], i * 3)
+          at.aEnd.array.set([b.pos.x, b.pos.y, b.pos.z], i * 3)
+          at.aColorA.array.set([a.color.r, a.color.g, a.color.b], i * 3)
+          at.aColorB.array.set([b.color.r, b.color.g, b.color.b], i * 3)
+          at.aFlow.array[i * 4 + 2] = lift
+        }
+        at.aGlow.array[i] = glow
+      }
+    }
+    for (const name of ['aStart', 'aEnd', 'aColorA', 'aColorB', 'aFlow', 'aGlow']) at[name].needsUpdate = true
+  }
   let dustRanges = []
 
   /** Rebuild the dust only when the set of systems or their sizes change — its motion is on the GPU. */
@@ -771,6 +880,7 @@ export function createWeb(stage) {
       }
     }
     rebuildDust()
+    updateStreams()
 
     // Suns and coronas
     const sunMesh = suns.ensure(nodes.size)

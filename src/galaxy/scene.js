@@ -118,6 +118,21 @@ export function createScene(container) {
     if (flight) flight.track = null
   }
 
+  /**
+   * Hand the camera to someone else — you, flying. While piloted, the orbit controls, flights and
+   * follows all stand down; whoever holds the camera moves it before each render.
+   */
+  let piloted = false
+  function setPiloted(on) {
+    piloted = on
+    flight = null
+    follow = null
+    controls.enabled = !on
+    controls.autoRotate = false
+    clearTimeout(resumeTimer)
+    if (!on && !reducedMotion) resumeTimer = setTimeout(() => (controls.autoRotate = true), 8000)
+  }
+
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
   // Governor: if the glow is making frames slow, drop it rather than stutter. It only ever turns
@@ -143,7 +158,9 @@ export function createScene(container) {
   function render(dt) {
     uniforms.uTime.value += dt
     grade.uniforms.uTime.value = uniforms.uTime.value
-    if (flight) {
+    if (piloted) {
+      // The pilot has already placed the camera this frame.
+    } else if (flight) {
       const t = Math.min(1, (performance.now() - flight.start) / flight.duration)
       const k = ease(t)
       const look = flight.track?.() || flight.target
@@ -171,7 +188,7 @@ export function createScene(container) {
         lastFollow.copy(p)
       }
     }
-    controls.update()
+    if (!piloted) controls.update()
     motes.position.copy(camera.position)
 
     if (Math.abs(shiftTarget - shift) > 0.25) {
@@ -193,9 +210,12 @@ export function createScene(container) {
   }
 
   return {
-    renderer, scene, camera, controls, uniforms, flyTo, stopFollowing, render, setViewShift, setQuality, reducedMotion,
+    renderer, scene, camera, controls, uniforms, flyTo, stopFollowing, setPiloted, render, setViewShift, setQuality, reducedMotion,
     get flying() {
       return Boolean(flight) || Math.abs(shiftTarget - shift) > 0.25
+    },
+    get piloted() {
+      return piloted
     },
     get bloomOn() {
       return bloomOn
