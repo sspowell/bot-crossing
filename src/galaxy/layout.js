@@ -1,11 +1,14 @@
 /**
- * Where things live in the galaxy.
+ * Where things live in the sky.
  *
- * The rule that matters: a node never moves because a *different* node appeared. Positions come
- * from each node's own name, not from its place in a sorted list, and once placed a node's spot
- * is saved — so the galaxy you learned yesterday is the galaxy you open today. Dragging something
- * is the only thing that moves it.
+ * The rule that matters: a sun never moves because a *different* sun appeared. Positions come
+ * from each list's own name, not from its place in a sorted list, and once placed a sun's spot is
+ * saved — so the sky you learned yesterday is the sky you open today. Dragging something is the
+ * only thing that moves it.
  */
+
+/** Bumped when the meaning of saved positions changes, so old spots are cleared once. */
+export const LAYOUT_VERSION = 'solar-1'
 
 /** FNV-1a — stable across sessions and machines, which is the whole point. */
 export function hashString(s) {
@@ -29,43 +32,48 @@ export function seeded(seed) {
   }
 }
 
-const NODE_GAP = 80
+/** Far enough apart that the outermost orbits of two systems never touch. */
+const SYSTEM_GAP = 135
 const GOLDEN_ANGLE = 2.399963
 
 /**
- * A spot for a node that has never been placed. Starts where its own name says, and walks out
- * along a golden-angle spiral until it's clear of every node already in the sky.
+ * A spot for a sun that has never been placed. Starts where its own name says, and walks out
+ * along a golden-angle spiral until it's clear of every sun already in the sky.
  */
 export function placeNode(name, taken) {
   const r = seeded(hashString(`node:${name}`))
   let angle = r() * Math.PI * 2
-  let radius = 50 + r() * 60
-  const lift = (r() - 0.5) * 30
+  let radius = 90 + r() * 80
+  const lift = (r() - 0.5) * 70
   for (let i = 0; i < 400; i++) {
     const p = [Math.cos(angle) * radius, lift, Math.sin(angle) * radius]
-    if (taken.every((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) >= NODE_GAP)) return p
+    if (taken.every((q) => Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]) >= SYSTEM_GAP)) return p
     angle += GOLDEN_ANGLE
-    radius += 5
+    radius += 9
   }
   return [Math.cos(angle) * radius, lift, Math.sin(angle) * radius]
 }
 
+/** A sun grows with the number of tasks in its list, but slowly — ten tasks isn't ten times hotter. */
+export const sunRadiusOf = (count) => Math.min(7.5, 2.8 + Math.sqrt(Math.max(0, count)) * 0.85)
+
 /**
- * Where a thought sits around its node, relative to the node. A flattened shell — thoughts
- * cluster like a small spiral galaxy around their centre rather than a perfect ball.
+ * A planet's orbit around its sun, stored as [x, inclination, z]:
+ *   hypot(x, z)  distance beyond the sun's edge
+ *   atan2(z, x)  where on the orbit it started
+ *   inclination  tilt of the orbit's plane, in radians
  */
 export function thoughtOffset(id) {
   const r = seeded(hashString(`thought:${id}`))
-  const u = r() * 2 - 1
+  const radius = 6 + r() * 34
   const theta = r() * Math.PI * 2
-  const ring = Math.sqrt(1 - u * u)
-  const radius = 11 + r() * 17
-  return [ring * Math.cos(theta) * radius, u * radius * 0.4, ring * Math.sin(theta) * radius]
+  const incl = (r() - 0.5) * 0.4
+  return [Math.cos(theta) * radius, incl, Math.sin(theta) * radius]
 }
 
 /** A per-thought number in [0, 1) for anything that should vary but never flicker. */
 export const phaseOf = (id) => seeded(hashString(`phase:${id}`))()
 
-/** Soft nebula hues, one per node, chosen by name so a node keeps its colour forever. */
-const NEBULA = ['#9d86ff', '#56d4c8', '#6c95ff', '#e37bd9', '#f0b574', '#7fdc9a', '#ff8f9f', '#8fd0ff']
-export const hueOf = (name) => NEBULA[hashString(`hue:${name}`) % NEBULA.length]
+/** Star colours, one per list, chosen by name so a sun keeps its colour forever. */
+const SUNS = ['#ffb35c', '#ff8a4c', '#ffd27a', '#8fb8ff', '#ff6f5e', '#ffe2b0', '#c79bff', '#6fe0d0']
+export const hueOf = (name) => SUNS[hashString(`hue:${name}`) % SUNS.length]

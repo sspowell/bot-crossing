@@ -1,16 +1,16 @@
-/* Thought Galaxy — a black sky, starlight type, glass that barely exists.
-   Palette:  void #000 · starlight #eef3ff · tangled #ff5c77 · asking #ffcf7a
+/* Thought Galaxy — deep space, sunlit type, smoked glass that barely exists.
+   Palette:  void #030205 · sunlight #f4ecdf · tangled #ff5a4a · asking #ffc46b
    Type:     Fraunces (light italic) for names you read · Manrope for everything you operate */
 
 :root {
-  --void: #000;
-  --star: #eef3ff;
-  --soft: rgba(238, 243, 255, 0.58);
-  --faint: rgba(238, 243, 255, 0.32);
-  --hair: rgba(238, 243, 255, 0.09);
-  --glass: rgba(9, 11, 19, 0.58);
-  --tangled: #ff5c77;
-  --asking: #ffcf7a;
+  --void: #030205;
+  --star: #f4ecdf;
+  --soft: rgba(244, 236, 223, 0.6);
+  --faint: rgba(244, 236, 223, 0.34);
+  --hair: rgba(244, 236, 223, 0.09);
+  --glass: rgba(14, 10, 9, 0.62);
+  --tangled: #ff5a4a;
+  --asking: #ffc46b;
   --display: 'Fraunces', 'Iowan Old Style', Georgia, serif;
   --ui: 'Manrope', 'Segoe UI', system-ui, sans-serif;
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -44,7 +44,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 .g-cursor {
   position: fixed; left: 0; top: 0; width: 420px; height: 420px; margin: -210px 0 0 -210px;
   border-radius: 50%; pointer-events: none; z-index: 1;
-  background: radial-gradient(circle, rgba(140, 160, 255, 0.07) 0%, rgba(140, 160, 255, 0) 60%);
+  background: radial-gradient(circle, rgba(255, 190, 130, 0.06) 0%, rgba(255, 190, 130, 0) 60%);
   mix-blend-mode: screen;
 }
 
@@ -54,7 +54,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   display: flex; align-items: center; gap: 28px; pointer-events: none;
 }
 .g-brand { display: flex; align-items: center; gap: 12px; }
-.g-mark { font-size: 18px; color: var(--star); text-shadow: 0 0 14px rgba(200, 215, 255, 0.9); }
+.g-mark { font-size: 18px; color: var(--star); text-shadow: 0 0 14px rgba(255, 196, 120, 0.9); }
 .g-title { font-family: var(--display); font-style: italic; font-weight: 300; font-size: 22px; letter-spacing: 0.01em; line-height: 1; }
 .g-sub { font-size: 10.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--faint); margin-top: 5px; }
 
@@ -68,14 +68,14 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 .g-stat span { font-size: 11px; letter-spacing: 0.08em; color: var(--soft); }
 .g-stat.tangled b { color: var(--tangled); }
 .g-stat.asking b { color: var(--asking); }
-.g-stat:hover, .g-stat.on { border-color: rgba(238, 243, 255, 0.28); background: rgba(238, 243, 255, 0.04); }
+.g-stat:hover, .g-stat.on { border-color: rgba(244, 236, 223, 0.28); background: rgba(244, 236, 223, 0.04); }
 
 .g-progress { width: 130px; height: 1px; background: var(--hair); position: relative; overflow: hidden; }
 .g-progress i { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(238,243,255,.2), var(--star)); transform-origin: left; transition: transform 900ms var(--ease); }
 
 .g-history { display: flex; align-items: center; gap: 8px; }
 .g-history svg { width: 90px; height: 22px; overflow: visible; }
-.g-history .line { fill: none; stroke: rgba(238, 243, 255, 0.45); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.g-history .line { fill: none; stroke: rgba(244, 236, 223, 0.45); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
 .g-history .dot { fill: var(--star); }
 .g-history span { font-size: 11px; color: var(--faint); white-space: nowrap; }
 .g-history.better span { color: #9fe3b8; }
@@ -88,7 +88,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   border: 1px solid var(--hair); background: rgba(9, 11, 19, 0.4); color: var(--soft);
   transition: color 250ms var(--ease), border-color 250ms var(--ease), background 250ms var(--ease);
 }
-.g-action:hover { color: var(--star); border-color: rgba(238, 243, 255, 0.28); }
+.g-action:hover { color: var(--star); border-color: rgba(244, 236, 223, 0.28); }
 .g-action.gear { width: 34px; padding: 7px 0; }
 .focus-mode .g-action.focus { color: #05060a; background: var(--star); border-color: transparent; }
 
@@ -100,12 +100,12 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 .g-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--soft); }
 .g-seg { display: flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--hair); }
 .g-seg button { border: 0; background: transparent; color: var(--soft); font-size: 11.5px; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
-.g-seg button.on { background: rgba(238, 243, 255, 0.12); color: var(--star); }
+.g-seg button.on { background: rgba(244, 236, 223, 0.12); color: var(--star); }
 
 .g-capture {
   position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 9;
   display: flex; gap: 8px; padding: 8px; border-radius: 16px; width: min(560px, calc(100vw - 24px));
-  background: var(--glass); border: 1px solid rgba(238, 243, 255, 0.18); backdrop-filter: blur(18px);
+  background: var(--glass); border: 1px solid rgba(244, 236, 223, 0.18); backdrop-filter: blur(18px);
   box-shadow: 0 0 60px rgba(160, 180, 255, 0.08); animation: rise 400ms var(--ease);
 }
 .g-capture-input {
@@ -114,7 +114,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 }
 .g-capture-input::placeholder { color: var(--faint); }
 .g-capture-list {
-  background: rgba(238, 243, 255, 0.05); color: var(--soft); border: 1px solid var(--hair); border-radius: 10px;
+  background: rgba(244, 236, 223, 0.05); color: var(--soft); border: 1px solid var(--hair); border-radius: 10px;
   font: inherit; font-size: 12px; padding: 0 8px; max-width: 150px;
 }
 .g-capture .g-btn { flex: 0 0 auto; }
@@ -145,7 +145,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   padding: 6px 11px; border-radius: 8px; font-size: 12.5px;
   background: rgba(0, 0, 0, 0.6); border: 1px solid var(--hair); backdrop-filter: blur(8px);
 }
-.g-tooltip.tangled { border-color: rgba(255, 92, 119, 0.4); }
+.g-tooltip.tangled { border-color: rgba(255, 90, 74, 0.4); }
 .g-tooltip.asking { border-color: rgba(255, 207, 122, 0.4); }
 
 /* ── thought card ────────────────────────────────────────────────────── */
@@ -157,7 +157,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   animation: rise 500ms var(--ease);
   transition: opacity 250ms var(--ease);
 }
-.g-card[data-state='tangled'] { border-color: rgba(255, 92, 119, 0.35); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(255, 92, 119, 0.08); }
+.g-card[data-state='tangled'] { border-color: rgba(255, 90, 74, 0.35); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(255, 90, 74, 0.08); }
 .g-card[data-state='asking'] { border-color: rgba(255, 207, 122, 0.35); box-shadow: 0 20px 60px rgba(0,0,0,.6), 0 0 40px rgba(255, 207, 122, 0.08); }
 @keyframes rise { from { opacity: 0; filter: blur(6px); } to { opacity: 1; filter: blur(0); } }
 
@@ -177,19 +177,19 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 
 .g-btn {
   flex: 1; padding: 9px 12px; border-radius: 10px; font-size: 12.5px; font-weight: 500; cursor: pointer;
-  border: 1px solid var(--hair); background: rgba(238, 243, 255, 0.04);
+  border: 1px solid var(--hair); background: rgba(244, 236, 223, 0.04);
   transition: background 250ms var(--ease), border-color 250ms var(--ease), opacity 250ms;
 }
-.g-btn:hover:not(:disabled) { background: rgba(238, 243, 255, 0.1); border-color: rgba(238, 243, 255, 0.25); }
+.g-btn:hover:not(:disabled) { background: rgba(244, 236, 223, 0.1); border-color: rgba(244, 236, 223, 0.25); }
 .g-btn.resolve { background: var(--star); color: #05060a; border-color: transparent; }
-.g-btn.resolve:hover:not(:disabled) { background: #fff; box-shadow: 0 0 24px rgba(238, 243, 255, 0.35); }
+.g-btn.resolve:hover:not(:disabled) { background: #fff; box-shadow: 0 0 24px rgba(244, 236, 223, 0.35); }
 .g-btn:disabled { opacity: 0.32; cursor: not-allowed; }
 
 .g-close {
   position: absolute; top: 12px; right: 12px; width: 28px; height: 28px; border-radius: 50%;
   border: 0; background: transparent; color: var(--faint); font-size: 20px; line-height: 1; cursor: pointer;
 }
-.g-close:hover { color: var(--star); background: rgba(238, 243, 255, 0.06); }
+.g-close:hover { color: var(--star); background: rgba(244, 236, 223, 0.06); }
 
 /* ── node panel ──────────────────────────────────────────────────────── */
 .g-panel {
@@ -210,7 +210,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   padding: 9px 10px; border-radius: 10px; background: transparent; border: 0; cursor: pointer;
   transition: background 200ms var(--ease);
 }
-.g-panel-list button:hover { background: rgba(238, 243, 255, 0.06); }
+.g-panel-list button:hover { background: rgba(244, 236, 223, 0.06); }
 .g-panel-list i { grid-row: span 2; width: 6px; height: 6px; border-radius: 50%; margin-top: 7px; background: var(--star); opacity: 0.6; }
 .g-panel-list .tangled i { background: var(--tangled); opacity: 1; box-shadow: 0 0 8px var(--tangled); }
 .g-panel-list .asking i { background: var(--asking); opacity: 1; box-shadow: 0 0 8px var(--asking); }
@@ -229,7 +229,7 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
   transition: background 300ms var(--ease), color 300ms var(--ease);
 }
 .g-chip:hover { color: var(--star); }
-.g-chip.on { background: rgba(238, 243, 255, 0.1); color: var(--star); }
+.g-chip.on { background: rgba(244, 236, 223, 0.1); color: var(--star); }
 
 .g-hint { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 4; font-size: 11px; color: var(--faint); white-space: nowrap; pointer-events: none; }
 kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--hair); }
@@ -243,7 +243,7 @@ kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 
   transition: opacity 400ms var(--ease), transform 400ms var(--ease);
 }
 .g-toast.show { opacity: 1; transform: translate(-50%, 0); }
-.g-toast.err { border-color: rgba(255, 92, 119, 0.45); }
+.g-toast.err { border-color: rgba(255, 90, 74, 0.45); }
 
 .g-empty { position: fixed; inset: 0; display: grid; place-content: center; text-align: center; gap: 8px; z-index: 2; pointer-events: none; }
 .g-empty .g-title { font-size: 34px; }

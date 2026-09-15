@@ -1,16 +1,15 @@
 /**
- * Thought Galaxy — the front door.
+ * Thought Galaxy — the front door: one solar system per list, one world per task.
  *
  * Same bones as the colony: the server, the TickTick adapter, `/api/threads`, the colony state
  * file. Only the picture changed. This file wires them together: fetch the thoughts, place them,
  * handle your hands, and save wherever you pull something to.
  */
 import './styles.css'
-import * as THREE from 'three'
 import { createScene } from './scene.js'
-import { createWeb, stateOf } from './web.js'
+import { createWeb, stateOf } from './solar.js'
 import { createUi, FILTERS } from './ui.js'
-import { placeNode, thoughtOffset, phaseOf, hueOf } from './layout.js'
+import { placeNode, thoughtOffset, phaseOf, hueOf, LAYOUT_VERSION } from './layout.js'
 import { fetchThreads, fetchState, saveState, openThread } from '../game/api.js'
 
 const POLL_MS = 12_000
@@ -21,6 +20,7 @@ const IDLE_AFTER_MS = 15_000
 const root = document.getElementById('galaxy')
 const stage = createScene(root)
 const web = createWeb(stage)
+if (import.meta.env?.DEV) window.__galaxy = { stage, web }
 
 let state = { galaxy: {} }
 let stateLoaded = false
@@ -57,7 +57,7 @@ const actions = {
     ui.fillPanel(web, name)
     stage.setViewShift(170)
     const node = web.nodes.get(name)
-    if (node) stage.flyTo(node.pos.clone(), 95)
+    if (node) stage.flyTo(node.pos.clone(), 150)
     if (selected && web.thoughts.get(selected)?.node !== name) actions.close()
   },
 
@@ -67,7 +67,7 @@ const actions = {
     ui.fillPanel(web, null)
     stage.setViewShift(0)
     actions.close()
-    if (fly) stage.flyTo(new THREE.Vector3(0, 0, 0), 270)
+    if (fly) flyHome()
   },
 
   selectThought(id) {
@@ -76,10 +76,11 @@ const actions = {
     selected = id
     web.setSelected(id)
     ui.fillCard(web, id)
-    stage.flyTo(t.world.clone(), 45)
+    stage.flyTo(t.world.clone(), 30, () => web.thoughts.get(id)?.world)
   },
 
   close() {
+    stage.stopFollowing()
     selected = null
     web.setSelected(null)
     ui.card.hidden = true
@@ -163,7 +164,7 @@ const actions = {
     ui.setFocus(null)
     actions.close()
     applyFilter()
-    stage.flyTo(new THREE.Vector3(0, 0, 0), 270)
+    flyHome()
   },
 
   openCapture() {
@@ -202,6 +203,12 @@ const actions = {
 
 const ui = createUi(root, actions)
 
+/** Pull back far enough to take in every system at once. */
+function flyHome() {
+  const { point, extent } = web.center()
+  stage.flyTo(point, Math.min(1300, extent * 1.6 + 60))
+}
+
 function showFocused() {
   if (!focus) return
   // Anything resolved or moved away since the queue was built drops out here.
@@ -231,10 +238,16 @@ applyQuality()
 function apply(list) {
   threads = list.filter((t) => !t.archived)
   const galaxy = (state.galaxy ||= {})
+  let placedNew = false
+  // Saved spots from the old star-web layout mean something else now: clear them once.
+  if (stateLoaded && galaxy.layout !== LAYOUT_VERSION) {
+    for (const key of Object.keys(galaxy)) if (key.startsWith('node:') || key.startsWith('thought:')) delete galaxy[key]
+    galaxy.layout = LAYOUT_VERSION
+    placedNew = true
+  }
 
   const names = [...new Set(threads.map((t) => t.project || 'Unsorted'))].sort()
   const taken = names.map((n) => galaxy[`node:${n}`]).filter(Array.isArray)
-  let placedNew = false
 
   const nodeList = names.map((name) => {
     let pos = galaxy[`node:${name}`]
@@ -389,7 +402,7 @@ addEventListener('pointerup', () => {
     const target = web.endDrag(hit.kind, hit.id)
     if (target) return moveThought(hit.id, target)
     queueSave()
-    ui.toast(hit.kind === 'node' ? 'Moved the whole cluster' : 'Pulled free — it stays where you left it')
+    ui.toast(hit.kind === 'node' ? 'Moved the whole system' : 'New orbit — it keeps circling from there')
     return
   }
   if (moved) return
@@ -485,7 +498,10 @@ Promise.allSettled([fetchState(), fetchThreads()]).then(([s, t]) => {
     state.galaxy ||= {}
     stateLoaded = true
   }
-  if (t.status === 'fulfilled') apply(Array.isArray(t.value) ? t.value : t.value.threads || [])
+  if (t.status === 'fulfilled') {
+    apply(Array.isArray(t.value) ? t.value : t.value.threads || [])
+    flyHome()
+  }
   else ui.toast('Could not reach the server', 'err')
 })
 setInterval(poll, POLL_MS)

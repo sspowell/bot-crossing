@@ -1,16 +1,16 @@
 /**
- * Everything drawn in HTML over the sky: the untangle meter, node names, the card for a
- * selected thought, the panel for a focused node, filters, and toasts.
+ * Everything drawn in HTML over the sky: the untangle meter, sun names, the card for a
+ * selected world, the panel for a focused system, filters, and toasts.
  *
  * It only ever describes what the web already shows. If this layer and the stars disagree about
- * a thought, that's a bug — both read the same `stateOf`.
+ * a task, that's a bug — both read the same `stateOf`.
  */
-import { stateOf } from './web.js'
+import { stateOf } from './solar.js'
 
 const esc = (s) =>
   String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c])
 
-const STATE_WORD = { tangled: 'Tangled', asking: 'Asking for you', drifting: 'Drifting' }
+const STATE_WORD = { tangled: 'Tangled · falling sunward', asking: 'Asking for you', drifting: 'In orbit' }
 
 export const FILTERS = [
   { id: 'all', label: 'Everything', test: null },
@@ -30,7 +30,7 @@ export function createUi(root, actions) {
         <span class="g-mark">✦</span>
         <div>
           <div class="g-title">thought galaxy</div>
-          <div class="g-sub">untangle the web</div>
+          <div class="g-sub">untangle the orbits</div>
         </div>
       </div>
       <div class="g-meter" role="group" aria-label="State of the web">
@@ -85,18 +85,18 @@ export function createUi(root, actions) {
     </article>
 
     <aside class="g-panel" hidden>
-      <button class="g-back" data-act="unfocus">← whole galaxy</button>
+      <button class="g-back" data-act="unfocus">← all systems</button>
       <h2 class="g-panel-title"></h2>
       <div class="g-panel-sub"></div>
       <ol class="g-panel-list"></ol>
     </aside>
 
     <nav class="g-filters" aria-label="Filter thoughts"></nav>
-    <div class="g-hint">drag a star onto another node to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
+    <div class="g-hint">drag a world onto another sun to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
     <a class="g-colony" href="/colony">colony view ↗</a>
     <div class="g-toast" role="status"></div>
     <div class="g-empty" hidden>
-      <div class="g-title">the sky is quiet</div>
+      <div class="g-title">the systems are quiet</div>
       <div class="g-sub">No open thoughts found. Add something in TickTick and it will appear here.</div>
     </div>
   `
@@ -268,10 +268,10 @@ export function createUi(root, actions) {
       const n = web.nodes.get(name)
       if (!n) continue
       const s = web.screenOf(n.pos)
-      const fade = Math.max(0, Math.min(1, (620 - s.depth) / 260)) * Math.min(1, n.glow)
+      const fade = Math.max(0, Math.min(1, (1100 - s.depth) / 350)) * Math.min(1, n.glow)
       const dim = focusNode && focusNode !== name ? 0.2 : 1
       el.style.opacity = s.visible ? (fade * dim).toFixed(3) : '0'
-      el.style.transform = `translate3d(${s.x.toFixed(1)}px, ${(s.y + 26).toFixed(1)}px, 0) translate(-50%, 0)`
+      el.style.transform = `translate3d(${s.x.toFixed(1)}px, ${(s.y + 18 + Math.min(320, (n.radius || 0) * s.ppu * 1.9)).toFixed(1)}px, 0) translate(-50%, 0)`
       el.style.pointerEvents = s.visible && fade * dim > 0.3 ? 'auto' : 'none'
     }
   }
@@ -324,9 +324,11 @@ export function createUi(root, actions) {
     const w = card.offsetWidth || 320
     const h = card.offsetHeight || 200
     const panelRoom = panel.hidden ? 0 : 340
-    let x = s.x + 28
+    // Clear the planet itself (and its rings, if it has them), not just its centre.
+    const clear = 28 + Math.min(260, (t.size || 1) * s.ppu * 2.5)
+    let x = s.x + clear
     let y = s.y - h / 2
-    if (x + w > innerWidth - panelRoom - 16) x = s.x - w - 28
+    if (x + w > innerWidth - panelRoom - 16) x = s.x - w - clear
     x = Math.max(16, Math.min(innerWidth - w - 16, x))
     y = Math.max(84, Math.min(innerHeight - h - 90, y))
     card.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`
