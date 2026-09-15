@@ -39,7 +39,28 @@ export function createUi(root, actions) {
         <button class="g-stat calm" data-filter="all"><b>0</b><span>thoughts</span></button>
       </div>
       <div class="g-progress" title="Share of thoughts that aren't tangled or asking"><i></i></div>
+      <div class="g-history" title="Tangled thoughts per day"><svg viewBox="0 0 120 28" preserveAspectRatio="none"><path class="line"/><circle class="dot" r="2"/></svg><span></span></div>
+      <div class="g-actions">
+        <button class="g-action capture" data-act="openCapture" hidden title="Add a thought (C)">＋ thought</button>
+        <button class="g-action focus" data-act="enterFocus" title="One thought at a time (F)">Focus</button>
+        <button class="g-action gear" data-act="toggleSettings" aria-label="Display settings" title="Display settings">⚙</button>
+      </div>
     </header>
+
+    <div class="g-settings" hidden>
+      <div class="g-set-row"><span>Glow</span>
+        <div class="g-seg" data-setting="bloom"><button data-value="on">On</button><button data-value="off">Off</button></div>
+      </div>
+      <div class="g-set-row"><span>Detail</span>
+        <div class="g-seg" data-setting="detail"><button data-value="low">Low</button><button data-value="balanced">Balanced</button><button data-value="high">High</button></div>
+      </div>
+    </div>
+
+    <form class="g-capture" hidden autocomplete="off">
+      <input class="g-capture-input" maxlength="200" placeholder="a thought, in a few words…" aria-label="New thought" />
+      <select class="g-capture-list" aria-label="Which list"></select>
+      <button class="g-btn resolve" type="submit">Release</button>
+    </form>
 
     <div class="g-labels" aria-hidden="true"></div>
     <div class="g-tooltip" hidden></div>
@@ -55,7 +76,12 @@ export function createUi(root, actions) {
         <button class="g-btn resolve" data-act="resolve">Resolve</button>
       </div>
       <div class="g-card-hint"></div>
-      <button class="g-close" data-act="close" aria-label="Close">×</button>
+      <div class="g-card-focus" hidden>
+        <span class="g-focus-count"></span>
+        <button class="g-btn ghost" data-act="skipFocus">Not now</button>
+        <button class="g-btn ghost" data-act="exitFocus">Leave focus</button>
+      </div>
+      <button class="g-close" data-act="dismiss" aria-label="Close">×</button>
     </article>
 
     <aside class="g-panel" hidden>
@@ -66,7 +92,7 @@ export function createUi(root, actions) {
     </aside>
 
     <nav class="g-filters" aria-label="Filter thoughts"></nav>
-    <div class="g-hint">drag to orbit · scroll to dive · drag a star to pull it free · <kbd>N</kbd> next tangle · <kbd>Esc</kbd> release</div>
+    <div class="g-hint">drag a star onto another node to move it · <kbd>N</kbd> next tangle · <kbd>F</kbd> focus · <kbd>C</kbd> capture · <kbd>Esc</kbd> release</div>
     <a class="g-colony" href="/colony">colony view ↗</a>
     <div class="g-toast" role="status"></div>
     <div class="g-empty" hidden>
@@ -100,7 +126,87 @@ export function createUi(root, actions) {
     if (act) actions[act.dataset.act]?.()
     const item = e.target.closest('[data-thought]')
     if (item) actions.selectThought(item.dataset.thought)
+    const seg = e.target.closest('.g-seg button')
+    if (seg) actions.setSetting(seg.parentElement.dataset.setting, seg.dataset.value)
   })
+
+  const captureForm = $('.g-capture')
+  const captureInput = $('.g-capture-input')
+  const captureList = $('.g-capture-list')
+  captureForm.addEventListener('submit', (e) => {
+    e.preventDefault()
+    const title = captureInput.value.trim()
+    if (!title) return
+    actions.submitCapture(title, captureList.value, captureList.selectedOptions[0]?.dataset.node || '')
+    captureInput.value = ''
+  })
+  captureInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.stopPropagation()
+      closeCapture()
+    }
+  })
+
+  function openCapture(lists, preferred) {
+    captureList.innerHTML =
+      `<option value="" data-node="">Inbox</option>` +
+      lists.map((l) => `<option value="${esc(l.id)}" data-node="${esc(l.name)}">${esc(l.name)}</option>`).join('')
+    const pick = lists.find((l) => l.name === preferred)
+    if (pick) captureList.value = pick.id
+    captureForm.hidden = false
+    requestAnimationFrame(() => captureInput.focus())
+  }
+  function closeCapture() {
+    captureForm.hidden = true
+    captureInput.blur()
+  }
+
+  function setWritable(on) {
+    $('.g-action.capture').hidden = !on
+  }
+
+  function setSettings({ bloom, detail }) {
+    for (const b of root.querySelectorAll('[data-setting="bloom"] button')) b.classList.toggle('on', b.dataset.value === (bloom ? 'on' : 'off'))
+    for (const b of root.querySelectorAll('[data-setting="detail"] button')) b.classList.toggle('on', b.dataset.value === detail)
+  }
+  function toggleSettings(force) {
+    const el = $('.g-settings')
+    el.hidden = typeof force === 'boolean' ? !force : !el.hidden
+  }
+
+  /**
+   * The daily record: a quiet line of tangled counts, and the change over the last week. With a
+   * single day of data there's no line to draw — say that instead of drawing a flat one.
+   */
+  function setHistory(days) {
+    const el = $('.g-history')
+    const text = el.querySelector('span')
+    if (days.length < 2) {
+      el.classList.add('empty')
+      text.textContent = 'history starts today'
+      return
+    }
+    el.classList.remove('empty')
+    const recent = days.slice(-14)
+    const max = Math.max(1, ...recent.map((d) => d.tangled))
+    const pts = recent.map((d, i) => [(i / (recent.length - 1)) * 116 + 2, 24 - (d.tangled / max) * 20])
+    el.querySelector('.line').setAttribute('d', 'M' + pts.map((p) => p.map((n) => n.toFixed(1)).join(' ')).join(' L'))
+    const [lx, ly] = pts[pts.length - 1]
+    el.querySelector('.dot').setAttribute('cx', lx)
+    el.querySelector('.dot').setAttribute('cy', ly)
+    const weekAgo = days[Math.max(0, days.length - 8)]
+    const delta = days[days.length - 1].tangled - weekAgo.tangled
+    text.textContent = delta < 0 ? `${-delta} fewer tangled` : delta > 0 ? `${delta} more tangled` : 'holding steady'
+    el.classList.toggle('better', delta < 0)
+    el.classList.toggle('worse', delta > 0)
+  }
+
+  function setFocus(info) {
+    const row = card.querySelector('.g-card-focus')
+    row.hidden = !info
+    root.classList.toggle('focus-mode', Boolean(info))
+    if (info) row.querySelector('.g-focus-count').textContent = `${info.index + 1} of ${info.total}`
+  }
 
   // A soft light that trails the pointer — the only "effect" that isn't data, and it only
   // ever follows your hand.
@@ -272,5 +378,11 @@ export function createUi(root, actions) {
     cursor.style.transform = `translate3d(${cx.toFixed(1)}px, ${cy.toFixed(1)}px, 0)`
   }
 
-  return { setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, fillPanel, toast, frame, card, panel }
+  return {
+    setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, fillPanel, toast, frame, card, panel,
+    openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus,
+    get capturing() {
+      return !captureForm.hidden
+    },
+  }
 }

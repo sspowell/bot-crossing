@@ -10,6 +10,8 @@ import {
   newSession as harnessNewSession,
   openThread as harnessOpenThread,
   completeThread as harnessCompleteThread,
+  createThread as harnessCreateThread,
+  moveThread as harnessMoveThread,
   scanThreads,
 } from './scan.mjs'
 
@@ -433,6 +435,18 @@ export async function apiMiddleware(req, res, next) {
       const { harness, ref } = await readJsonBody(req)
       const done = await harnessCompleteThread(harness, ref)
       return send(res, done?.ok ? 200 : 400, done?.ok ? { ok: true } : { ok: false, error: done?.error || 'Could not complete that' })
+    }
+
+    if (url.pathname === '/api/create' && req.method === 'POST') {
+      const { harness, title, listId } = await readJsonBody(req)
+      const made = await harnessCreateThread(harness, { title, listId })
+      return send(res, made?.ok ? 200 : 400, made?.ok ? { ok: true, id: made.id || '' } : { ok: false, error: made?.error || 'Could not create that' })
+    }
+
+    if (url.pathname === '/api/move' && req.method === 'POST') {
+      const { harness, ref, to } = await readJsonBody(req)
+      const moved = await harnessMoveThread(harness, ref, to)
+      return send(res, moved?.ok ? 200 : 400, moved?.ok ? { ok: true } : { ok: false, error: moved?.error || 'Could not move that' })
     }
 
     if ((url.pathname === '/api/new-session' || url.pathname === '/api/reveal') && req.method === 'POST') {

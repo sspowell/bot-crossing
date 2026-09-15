@@ -73,6 +73,60 @@ button:focus-visible, a:focus-visible { outline: 1px solid var(--star); outline-
 .g-progress { width: 130px; height: 1px; background: var(--hair); position: relative; overflow: hidden; }
 .g-progress i { position: absolute; inset: 0; background: linear-gradient(90deg, rgba(238,243,255,.2), var(--star)); transform-origin: left; transition: transform 900ms var(--ease); }
 
+.g-history { display: flex; align-items: center; gap: 8px; }
+.g-history svg { width: 90px; height: 22px; overflow: visible; }
+.g-history .line { fill: none; stroke: rgba(238, 243, 255, 0.45); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
+.g-history .dot { fill: var(--star); }
+.g-history span { font-size: 11px; color: var(--faint); white-space: nowrap; }
+.g-history.better span { color: #9fe3b8; }
+.g-history.worse span { color: var(--tangled); }
+.g-history.empty svg { display: none; }
+
+.g-actions { margin-left: auto; display: flex; gap: 6px; pointer-events: auto; }
+.g-action {
+  padding: 7px 14px; border-radius: 999px; font-size: 12px; cursor: pointer;
+  border: 1px solid var(--hair); background: rgba(9, 11, 19, 0.4); color: var(--soft);
+  transition: color 250ms var(--ease), border-color 250ms var(--ease), background 250ms var(--ease);
+}
+.g-action:hover { color: var(--star); border-color: rgba(238, 243, 255, 0.28); }
+.g-action.gear { width: 34px; padding: 7px 0; }
+.focus-mode .g-action.focus { color: #05060a; background: var(--star); border-color: transparent; }
+
+.g-settings {
+  position: fixed; top: 70px; right: 26px; z-index: 9; padding: 14px; border-radius: 14px; width: 250px;
+  background: var(--glass); border: 1px solid var(--hair); backdrop-filter: blur(18px);
+  display: flex; flex-direction: column; gap: 12px; animation: rise 350ms var(--ease);
+}
+.g-set-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--soft); }
+.g-seg { display: flex; gap: 2px; padding: 2px; border-radius: 999px; border: 1px solid var(--hair); }
+.g-seg button { border: 0; background: transparent; color: var(--soft); font-size: 11.5px; padding: 5px 10px; border-radius: 999px; cursor: pointer; }
+.g-seg button.on { background: rgba(238, 243, 255, 0.12); color: var(--star); }
+
+.g-capture {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); z-index: 9;
+  display: flex; gap: 8px; padding: 8px; border-radius: 16px; width: min(560px, calc(100vw - 24px));
+  background: var(--glass); border: 1px solid rgba(238, 243, 255, 0.18); backdrop-filter: blur(18px);
+  box-shadow: 0 0 60px rgba(160, 180, 255, 0.08); animation: rise 400ms var(--ease);
+}
+.g-capture-input {
+  flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; color: var(--star);
+  font-family: var(--display); font-style: italic; font-weight: 300; font-size: 19px; padding: 6px 10px;
+}
+.g-capture-input::placeholder { color: var(--faint); }
+.g-capture-list {
+  background: rgba(238, 243, 255, 0.05); color: var(--soft); border: 1px solid var(--hair); border-radius: 10px;
+  font: inherit; font-size: 12px; padding: 0 8px; max-width: 150px;
+}
+.g-capture .g-btn { flex: 0 0 auto; }
+
+.g-card-focus { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hair); }
+.g-focus-count { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); margin-right: auto; }
+.g-card-focus .g-btn { flex: 0 0 auto; padding: 7px 10px; font-size: 11.5px; }
+
+/* Focus mode: the rest of the sky steps back. */
+.focus-mode .g-labels, .focus-mode .g-filters, .focus-mode .g-panel, .focus-mode .g-hint { opacity: 0; pointer-events: none; transition: opacity 600ms var(--ease); }
+.g-labels, .g-filters, .g-hint { transition: opacity 600ms var(--ease); }
+
 /* ── node labels ─────────────────────────────────────────────────────── */
 .g-labels { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
 .g-label {
@@ -197,7 +251,10 @@ kbd { font-family: var(--ui); font-size: 10px; padding: 1px 5px; border-radius: 
 
 @media (max-width: 760px) {
   .g-top { flex-wrap: wrap; gap: 12px; left: 16px; right: 16px; top: 14px; }
-  .g-progress, .g-hint { display: none; }
+  .g-progress, .g-hint, .g-history { display: none; }
+  .g-actions { margin-left: 0; }
+  .g-capture { bottom: 76px; flex-wrap: wrap; }
+  .g-capture-list { max-width: none; flex: 1; height: 34px; }
   .g-panel { left: 12px; right: 12px; width: auto; top: auto; bottom: 90px; max-height: 45vh; }
   .g-card { width: calc(100vw - 32px); }
   .g-filters { bottom: 20px; max-width: calc(100vw - 24px); overflow-x: auto; }

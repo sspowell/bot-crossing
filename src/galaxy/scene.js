@@ -95,9 +95,23 @@ export function createScene(container) {
 
   const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2)
 
-  // Frame-time governor: if the glow is making frames slow, drop it rather than stutter.
+  // Frame-time governor: if the glow is making frames slow, drop it rather than stutter. It only
+  // ever turns glow *off* under what you chose; it never turns on something you switched off.
   let slowFrames = 0
   let bloomOn = true
+
+  function setQuality({ bloom, pixelRatio } = {}) {
+    if (typeof bloom === 'boolean') {
+      bloomOn = bloom
+      slowFrames = 0
+    }
+    if (pixelRatio) {
+      renderer.setPixelRatio(Math.min(devicePixelRatio, pixelRatio))
+      composer.setPixelRatio(renderer.getPixelRatio())
+      composer.setSize(innerWidth, innerHeight)
+      uniforms.uPixelRatio.value = renderer.getPixelRatio()
+    }
+  }
 
   function render(dt) {
     uniforms.uTime.value += dt
@@ -118,13 +132,23 @@ export function createScene(container) {
       applyShift()
     }
 
-    slowFrames = dt > 0.034 ? slowFrames + 1 : Math.max(0, slowFrames - 1)
-    if (bloomOn && slowFrames > 90) bloomOn = false
+    // Time the render itself, not the gap between frames. The gap is also long when the page is
+    // deliberately idling at 30fps or the tab is throttled, and neither means the glow is too heavy.
+    const started = performance.now()
     if (bloomOn) composer.render()
     else renderer.render(scene, camera)
+    if (bloomOn) {
+      slowFrames = performance.now() - started > 22 ? slowFrames + 1 : Math.max(0, slowFrames - 1)
+      if (slowFrames > 90) bloomOn = false
+    }
   }
 
-  return { renderer, scene, camera, controls, uniforms, flyTo, render, setViewShift, reducedMotion }
+  return {
+    renderer, scene, camera, controls, uniforms, flyTo, render, setViewShift, setQuality, reducedMotion,
+    get flying() {
+      return Boolean(flight) || Math.abs(shiftTarget - shift) > 0.25
+    },
+  }
 }
 
 /** A few thousand far, faint stars — denser along a tilted band, like looking into a disc. */

@@ -11,6 +11,9 @@ import * as THREE from 'three'
  *   rose + ripple overdue — a tangled thought, trembling
  *   gold + ripple due today — a thought asking for you
  *   size          priority — heavier thoughts burn bigger
+ *   moons         checklist steps; bright ones still to do, faint ones done
+ *   sinking       the longer a thought is overdue, the further it drifts from its node toward
+ *                 the galactic core — and the core glows with the weight of everything down there
  *
  * Whole crowd, one draw call per kind: all stars are one Points object, all threads one
  * LineSegments. Positions are computed on the CPU each frame because there are tens or hundreds
@@ -24,6 +27,11 @@ const ASKING = new THREE.Color('#ffcf7a')
 export const stateOf = (thread) => (thread.hasError ? 'tangled' : thread.unread ? 'asking' : 'drifting')
 
 const PULSE = { drifting: 0, asking: 1, tangled: 2 }
+
+const CORE = new THREE.Vector3(0, 0, 0)
+/** How far toward the core an overdue thought has sunk: none on day zero, most of the way by ~6 weeks. */
+const MAX_SINK = 0.55
+const sinkOf = (t) => (t.state === 'tangled' ? Math.min(MAX_SINK, (Number(t.thread.overdueDays) || 0) / 45) : 0)
 
 const starVertex = /* glsl */ `
   attribute vec3 color;
@@ -116,6 +124,8 @@ export function createWeb(stage) {
   let selected = null
   let focusNode = null
   let filter = null
+  let dropTarget = null
+  let coreGlow = 0
 
   // ── GPU objects ─────────────────────────────────────────────────────────────────────
   const starMaterial = new THREE.ShaderMaterial({
@@ -280,6 +290,7 @@ export function createWeb(stage) {
 
   // ── per frame ───────────────────────────────────────────────────────────────────────
   const tmp = new THREE.Vector3()
+  const tmp2 = new THREE.Vector3()
   const col = new THREE.Color()
 
   const rotY = (v, angle, out) => {
@@ -311,6 +322,7 @@ export function createWeb(stage) {
       n.arrive = Math.min(1, n.arrive + dt / 1.6)
       let target = focusNode && focusNode !== name ? 0.25 : 1
       if (hovered?.kind === 'node' && hovered.id === name) target = 1.5
+      if (dropTarget === name) target = 2.2
       if (n.leaving) target = 0
       n.glow += (target - n.glow) * k
       if (n.leaving && n.glow < 0.01) nodes.delete(name)
@@ -319,7 +331,9 @@ export function createWeb(stage) {
     let si = 0
     let bi = 0
     let li = 0
-    const starsNeeded = thoughts.size + nodes.size * 2
+    let moonCount = 0
+    for (const t of thoughts.values()) moonCount += t.thread.items?.length || 0
+    const starsNeeded = thoughts.size + nodes.size * 2 + moonCount + 2
     ensureCapacity(starsNeeded, thoughts.size + tagLinks.length)
 
     const sg = stars.geometry.attributes
@@ -342,6 +356,15 @@ export function createWeb(stage) {
       col.copy(n.color).lerp(STARLIGHT, 0.55)
       writeStar(n.pos, col, 20, g, 0, 0, 0)
       writeStar(n.pos, n.color, 95, g * 0.8, 0, 0, 1)
+    }
+
+    // The core only glows with what has sunk into it. A calm web has a dark centre.
+    let weight = 0
+    for (const t of thoughts.values()) if (!t.leaving && t.dissolving === null) weight += sinkOf(t) / MAX_SINK
+    coreGlow += (Math.min(1, weight / 6) - coreGlow) * (1 - Math.exp(-dt * 1.5))
+    if (coreGlow > 0.01) {
+      writeStar(CORE, TANGLED, 40 + coreGlow * 50, coreGlow * 0.9, 2, 0.5, 1)
+      writeStar(CORE, col.copy(TANGLED).lerp(STARLIGHT, 0.4), 8 + coreGlow * 8, coreGlow * 0.7, 2, 0.5, 0)
     }
 
     for (const [id, t] of thoughts) {
@@ -373,6 +396,8 @@ export function createWeb(stage) {
           tmp.y += Math.cos(time * 6 + t.phase * 30) * 0.18
         }
         t.world.copy(node.pos).add(tmp)
+        const sink = sinkOf(t) * arriveEase
+        if (sink > 0) t.world.lerp(CORE, sink)
       }
 
       const urgency = Number(t.thread.urgency) || 0
@@ -386,6 +411,18 @@ export function createWeb(stage) {
 
       const base = t.state === 'tangled' ? TANGLED : t.state === 'asking' ? ASKING : col.copy(STARLIGHT).lerp(node.color, 0.35)
       writeStar(t.world, base, size, glow, PULSE[t.state], t.phase, 0)
+
+      // Moons: one per checklist step, circling close. Done steps are faint, open ones bright.
+      const items = t.thread.items || []
+      if (items.length && t.dissolving === null) {
+        const radius = 2.4 + size * 0.09
+        const spin = reducedMotion ? 0 : time * 0.7
+        for (let i = 0; i < items.length; i++) {
+          const a = spin + t.phase * 6.283 + (i / items.length) * 6.283
+          tmp2.set(t.world.x + Math.cos(a) * radius, t.world.y + Math.sin(a * 2) * radius * 0.25, t.world.z + Math.sin(a) * radius)
+          writeStar(tmp2, items[i].done ? col.copy(node.color).lerp(STARLIGHT, 0.5) : STARLIGHT, 3.4, glow * (items[i].done ? 0.35 : 0.95), 0, 0, 0)
+        }
+      }
 
       if (t.state !== 'drifting' && t.dissolving === null) {
         bg.position.array.set([t.world.x, t.world.y, t.world.z], bi * 3)
@@ -516,14 +553,51 @@ export function createWeb(stage) {
     const node = t && nodes.get(t.node)
     if (!t || !node) return null
     t.world.copy(hit)
-    // Store it in the node's un-rotated frame, so it keeps drifting from exactly where it was left.
-    rotY(tmp.copy(hit).sub(node.pos), -angleOf(t, time), t.offset)
+
+    // Hovering over a different node while dragging = offering to move it into that list.
+    dropTarget = null
+    let best = 70
+    for (const n of nodes.values()) {
+      if (n.name === t.node) continue
+      const s = screenOf(n.pos)
+      const d = Math.hypot(s.x - x, s.y - y)
+      if (s.visible && d < best) {
+        best = d
+        dropTarget = n.name
+      }
+    }
+
+    // Undo the sink toward the core, then store it in the node's un-rotated frame — so on release
+    // it keeps drifting from exactly where it was left instead of jumping.
+    const sink = sinkOf(t)
+    tmp.copy(hit)
+    if (sink > 0) tmp.sub(tmp2.copy(CORE).multiplyScalar(sink)).divideScalar(1 - sink)
+    rotY(tmp.sub(node.pos), -angleOf(t, time), t.offset)
     return t.offset.toArray()
   }
 
+  /** Ends a drag. Returns the node it was dropped onto, if it was dropped onto one. */
   function endDrag(kind, id) {
     const obj = kind === 'thought' ? thoughts.get(id) : nodes.get(id)
     if (obj) obj.dragging = false
+    const target = kind === 'thought' ? dropTarget : null
+    dropTarget = null
+    return target
+  }
+
+  /** Optimistically move a thought to another node while the real move happens. */
+  function reassign(id, nodeName, offset) {
+    const t = thoughts.get(id)
+    if (!t || !nodes.has(nodeName)) return
+    t.node = nodeName
+    t.offset.fromArray(offset)
+    t.arrive = 0.35
+  }
+
+  /** A new star being born at a node: a small burst of starlight before the real task arrives. */
+  function birth(nodeName) {
+    const n = nodes.get(nodeName)
+    burst(n ? n.pos : CORE, STARLIGHT)
   }
 
   return {
@@ -534,6 +608,11 @@ export function createWeb(stage) {
     beginDrag,
     dragTo,
     endDrag,
+    reassign,
+    birth,
+    get dropTarget() {
+      return dropTarget
+    },
     nodes,
     thoughts,
     get tagLinks() {

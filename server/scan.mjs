@@ -123,8 +123,14 @@ export const newSession = async (harnessId, dir) => dispatch(harnessId).newSessi
  * Mark a thread done in the harness it came from. Optional: only an adapter that deliberately
  * implements `completeThread` can be written to — see "The one exception" in the harness README.
  */
-export const completeThread = async (harnessId, ref) => {
+export const completeThread = async (harnessId, ref) => optional(harnessId, 'completeThread', ref)
+
+/** Same exception, same rules: a new thread, and moving one to a different group. */
+export const createThread = async (harnessId, input) => optional(harnessId, 'createThread', input)
+export const moveThread = async (harnessId, ref, to) => optional(harnessId, 'moveThread', ref, to)
+
+async function optional(harnessId, method, ...args) {
   const h = dispatch(harnessId)
-  if (typeof h.completeThread !== 'function') return { ok: false, error: `${h.name} can't be changed from here` }
-  return h.completeThread(ref)
+  if (typeof h[method] !== 'function') return { ok: false, error: `${h.name} can't be changed from here` }
+  return h[method](...args)
 }

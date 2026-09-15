@@ -64,6 +64,29 @@ test('the list becomes the zone, and the link opens the task in TickTick', () =>
   assert.equal(ticktick.openThread(t.ref).ok, true)
 })
 
+test('checklist items become moons, and overdue has a real number of days', () => {
+  const t = toThread(
+    {
+      id: 'm', projectId: 'p', title: 'Prep class',
+      dueDate: iso(new Date(2026, 8, 10)), isAllDay: true,
+      items: [{ title: 'Playlist', status: 1 }, { title: 'Warmup', status: 0 }],
+    },
+    'Fitness', NOW
+  )
+  assert.deepEqual(t.items, [{ title: 'Playlist', done: true }, { title: 'Warmup', done: false }])
+  // Due all day Sept 10 → overdue from the end of that day → 3.5 days by noon on the 14th.
+  assert.equal(t.overdueDays, 3.5)
+  assert.equal(t.listId, 'p')
+  assert.ok(t.dueAt > 0)
+})
+
+test('writes are validated before anything reaches TickTick', async () => {
+  assert.equal((await ticktick.createThread({ title: '   ' })).ok, false)
+  assert.equal((await ticktick.createThread({ title: 'x', listId: '../../etc' })).ok, false)
+  assert.equal((await ticktick.moveThread({ projectId: 'a', taskId: 'b/../c' }, 'z')).ok, false)
+  assert.equal((await ticktick.completeThread({ projectId: 'a?x=1', taskId: 'b' })).ok, false)
+})
+
 test('priority reaches building size, and nothing carries the token', () => {
   const high = toThread({ id: 'h', projectId: 'p', title: 'x', priority: 5 }, 'L', NOW)
   const none = toThread({ id: 'n', projectId: 'p', title: 'x', priority: 0 }, 'L', NOW)

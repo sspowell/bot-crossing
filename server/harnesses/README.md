@@ -69,9 +69,12 @@ the gap between them. All of that is gone, and the scan no longer starts a subpr
 Archiving in the harness's own UI still works and is still the right way to do it — your adapter
 reports it through the `archived` field and the astronaut goes home on the next poll.
 
-### The one exception: `completeThread(ref)`
+### The one exception: `completeThread(ref)` — and its two siblings
 
-Optional, and only the TickTick adapter has it. A to-do list is not somebody's transcript: marking
+`createThread({ title, listId })` and `moveThread(ref, toListId)` follow exactly the same rules
+below and are exposed at `POST /api/create` and `POST /api/move`.
+
+Optional, and only the TickTick adapter has them. A to-do list is not somebody's transcript: marking
 a task done is the whole point of the list, and the galaxy view offers a "Resolve" button for it.
 The rules that keep it from becoming a general write:
 

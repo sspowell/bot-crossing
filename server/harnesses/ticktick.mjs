@@ -27,7 +27,7 @@
  * `completeThread` refuses. The token lives in `data/ticktick-token.json` (gitignored) and never
  * leaves this process — nothing in a Thread, including `ref`, carries it to the browser.
  *
- * The API is polled at most once a minute no matter how many tabs are open; a failed fetch keeps
+ * The API is polled at most every 25 seconds no matter how many tabs are open; a failed fetch keeps
  * showing the last good picture and reports why through `diagnostic()`.
  */
 import fsp from 'node:fs/promises'
@@ -40,7 +40,7 @@ const TOKEN_FILE =
   process.env.BOT_CROSSING_TICKTICK_TOKEN || path.join(here, '..', '..', 'data', 'ticktick-token.json')
 
 const API = 'https://api.ticktick.com/open/v1'
-const CACHE_MS = 60_000
+const CACHE_MS = 25_000
 const TIMEOUT_MS = 10_000
 const DAY_MS = 86_400_000
 
@@ -121,6 +121,14 @@ export function toThread(task, listName, now = Date.now(), { writable = false } 
     urgency: PRIORITY_URGENCY[priority] ?? 0,
     source: 'ticktick',
     tags: Array.isArray(task.tags) ? task.tags.map((t) => String(t).toLowerCase()) : [],
+    // Numbers the galaxy can do arithmetic on, rather than re-parsing labels.
+    dueAt: parseDate(task.dueDate),
+    overdueDays: state === 'overdue' ? Math.max(0, (now - (parseDate(task.dueDate) + (task.isAllDay ? DAY_MS : 0))) / DAY_MS) : 0,
+    // Checklist sub-steps — the galaxy draws them as moons, so a task hiding eight steps looks it.
+    items: (Array.isArray(task.items) ? task.items : [])
+      .slice(0, 24)
+      .map((it) => ({ title: String(it?.title || '').slice(0, 120), done: Number(it?.status) === 1 })),
+    listId: projectId,
     canOpen: Boolean(task.id && projectId),
     canResolve: Boolean(writable && task.id && projectId),
     ref: {
@@ -141,10 +149,11 @@ async function readAuth() {
   }
 }
 
-async function call(token, pathname, { method = 'GET' } = {}) {
+async function call(token, pathname, { method = 'GET', body } = {}) {
   const res = await fetch(API + pathname, {
     method,
-    headers: { Authorization: `Bearer ${token}` },
+    headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(TIMEOUT_MS),
   })
   if (res.status === 401) {
@@ -250,6 +259,62 @@ async function completeThread(ref) {
   return { ok: true }
 }
 
+async function writableToken() {
+  const { token, writable } = await readAuth()
+  if (!token) return { error: 'No TickTick login yet.' }
+  if (!writable) return { error: 'This TickTick login is read-only — run `node scripts/ticktick-auth.mjs --write`.' }
+  return { token }
+}
+
+/**
+ * A new thought, typed into the galaxy. Lands in the given list, or the Inbox without one.
+ * Validated before anything touches the network: a title is plain text with a length cap, and a
+ * list id has the same shape check as everywhere else.
+ */
+async function createThread({ title, listId } = {}) {
+  const clean = String(title || '').replace(/\s+/g, ' ').trim().slice(0, 200)
+  if (!clean) return { ok: false, error: 'A thought needs a few words.' }
+  const list = listId ? String(listId) : ''
+  if (list && !SAFE_ID.test(list)) return { ok: false, error: 'That list reference is malformed.' }
+
+  const auth = await writableToken()
+  if (auth.error) return { ok: false, error: auth.error }
+  try {
+    const task = await call(auth.token, '/task', { method: 'POST', body: list ? { title: clean, projectId: list } : { title: clean } })
+    cache = { ...cache, at: 0 } // show it on the very next poll
+    return { ok: true, id: task?.id ? ID(task.id) : '' }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
+/**
+ * Move a thought to a different list, via `POST /task/move`. Worth knowing: sending a new
+ * `projectId` through the ordinary update endpoint returns 200 and moves *nothing* — verified
+ * against a real account. So this reads the task back from the target list afterwards instead of
+ * trusting the status code; a silent no-op would leave the galaxy showing a move that never
+ * happened.
+ */
+async function moveThread(ref, toListId) {
+  const from = String(ref?.projectId || '')
+  const taskId = String(ref?.taskId || '')
+  const to = String(toListId || '')
+  if (![from, taskId, to].every((v) => SAFE_ID.test(v))) return { ok: false, error: 'That task or list reference is malformed.' }
+  if (from === to) return { ok: true }
+
+  const auth = await writableToken()
+  if (auth.error) return { ok: false, error: auth.error }
+  try {
+    await call(auth.token, '/task/move', { method: 'POST', body: [{ fromProjectId: from, toProjectId: to, taskId }] })
+    const landed = await call(auth.token, `/project/${to}/task/${taskId}`).catch(() => null)
+    cache = { ...cache, at: 0 }
+    if (!landed?.id) return { ok: false, error: "TickTick accepted the change but didn't move the task." }
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err.message }
+  }
+}
+
 const detect = () => exists(TOKEN_FILE)
 const diagnostic = async () => lastError
 
@@ -261,6 +326,8 @@ export default {
   openThread,
   newSession,
   completeThread,
+  createThread,
+  moveThread,
   diagnostic,
   paths: { TOKEN_FILE },
 }
