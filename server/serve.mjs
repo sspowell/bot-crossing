@@ -34,7 +34,9 @@ const server = http.createServer(async (req, res) => {
     return apiMiddleware(req, res, null)
   }
 
-  let file = resolveInDist(url.pathname)
+  // The original 3D colony lives on as its own page; the galaxy is the front door.
+  const pathname = url.pathname.replace(/\/+$/, '') === '/colony' ? '/colony.html' : url.pathname
+  let file = resolveInDist(pathname)
   if (!file) {
     res.writeHead(403).end('Forbidden')
     return
