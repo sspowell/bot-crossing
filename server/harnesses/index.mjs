@@ -10,8 +10,23 @@ import claudeCode from './claude-code.mjs'
 import codex from './codex.mjs'
 import cursor from './cursor.mjs'
 import businessTasks from './business-tasks.mjs'
+import ticktick from './ticktick.mjs'
 
-export const HARNESSES = [claudeCode, codex, cursor, businessTasks]
+const ALL = [claudeCode, codex, cursor, businessTasks, ticktick]
+
+/**
+ * Which of them the colony actually shows. This install is a picture of a TickTick account,
+ * so that's the default; the coding-agent harnesses are all still here, just switched off.
+ * Bring any back with a comma-separated list of ids, e.g.
+ *
+ *   BOT_CROSSING_HARNESSES=ticktick,claude-code
+ */
+const ENABLED = (process.env.BOT_CROSSING_HARNESSES || 'ticktick')
+  .split(',')
+  .map((id) => id.trim())
+  .filter(Boolean)
+
+export const HARNESSES = ALL.filter((h) => ENABLED.includes(h.id))
 
 export const harnessById = (id) => HARNESSES.find((h) => h.id === id) || null
 

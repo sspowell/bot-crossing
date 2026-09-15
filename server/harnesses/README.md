@@ -69,6 +69,20 @@ the gap between them. All of that is gone, and the scan no longer starts a subpr
 Archiving in the harness's own UI still works and is still the right way to do it — your adapter
 reports it through the `archived` field and the astronaut goes home on the next poll.
 
+### The one exception: `completeThread(ref)`
+
+Optional, and only the TickTick adapter has it. A to-do list is not somebody's transcript: marking
+a task done is the whole point of the list, and the galaxy view offers a "Resolve" button for it.
+The rules that keep it from becoming a general write:
+
+- It only ever runs because the person looking at the screen clicked Resolve — never from a scan.
+- It is off unless the saved credential was explicitly granted write access; threads advertise
+  `canResolve: false` otherwise, and the call refuses.
+- It returns `{ ok, error }` like `openThread`, and the server exposes it at `POST /api/complete`
+  behind the same Host/Origin checks as every other route.
+
+A coding-agent adapter should not grow one. Transcripts are still somebody's actual work.
+
 ## The `Thread` your adapter returns
 
 Only `id` is truly required, but the colony gets duller the more you leave out — `project` is
@@ -94,6 +108,7 @@ what earns a repo its own zone, and `lastActivityAt` is what sorts the whole map
 | `starred` / `routine` / `prState` | | Optional extras; `prState: 'merged'` triggers the confetti |
 | `archived` | boolean | Archived in the harness's own records. Read-only — reporting it is all an adapter does |
 | `sizeBytes` | number | Transcript size. **This is how finished a building looks**, on a log scale |
+| `urgency` | number | Optional, 0–1. A floor on how big the building grows, for importance a state can't express — the TickTick adapter sets it from task priority |
 | `source` | string | Free-form, for your own bookkeeping (the Claude adapter uses `desktop` / `cli`) |
 | `canOpen` | boolean | Whether this thread can be opened. The UI greys the button out |
 | `ref` | object | **Opaque.** Whatever *you* need to find this thread again |
@@ -109,8 +124,8 @@ Do not put a file handle, a class instance, or a secret in it.
 
 ## Ground rules
 
-- **Read-only. No exceptions.** `data/colony.json` is the only file Bot Crossing writes,
-  anywhere. A harness's transcripts and records are somebody's actual work; the colony is a
+- **Read-only, with one deliberate exception.** `data/colony.json` is the only file Bot Crossing
+  writes, anywhere. The exception is the optional `completeThread(ref)` below. A harness's transcripts and records are somebody's actual work; the colony is a
   viewer, not an editor. If an adapter seems to need a write, it does not — say so in an issue.
 - **Never run anything out of another application's bundle.** Not to read from it, not to
   execute it. Only files under the user's own home directory. Opening a thread goes through a
