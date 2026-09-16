@@ -10,7 +10,7 @@ import { createScene } from './scene.js'
 import { createWeb, stateOf } from './solar.js'
 import { createUi, FILTERS } from './ui.js'
 import { createFlyer } from './flyer.js'
-import { createHum } from './hum.js'
+import { createRadio } from './radio.js'
 import { placeNode, thoughtOffset, phaseOf, hueOf, LAYOUT_VERSION } from './layout.js'
 import { fetchThreads, fetchState, saveState, openThread } from '../game/api.js'
 
@@ -262,14 +262,29 @@ const actions = {
     ui.toast(`Heading to ${name}`)
   },
 
+  /** The radio on or off. Stations pick up where they left off. */
   toggleSound() {
-    soundWanted = !hum.on
-    if (soundWanted) hum.start()
-    else hum.stop()
-    ui.setSound(soundWanted)
+    soundWanted = !radio.on
+    if (soundWanted) radio.start()
+    else radio.stop()
+    showStation(radio.station)
     try {
       localStorage.setItem(SOUND_KEY, soundWanted ? 'on' : 'off')
     } catch {}
+  },
+
+  /** Flip stations, tuning through static on the way. */
+  station(step) {
+    if (!radio.on) {
+      soundWanted = true
+      radio.start()
+      try {
+        localStorage.setItem(SOUND_KEY, 'on')
+      } catch {}
+    }
+    const tuned = step > 0 ? radio.next() : radio.prev()
+    showStation(tuned)
+    ui.toast(`${tuned.name} · ${tuned.tag}`)
   },
 
   openCapture() {
@@ -311,22 +326,36 @@ const ui = createUi(root, actions)
 
 // ── flying ──────────────────────────────────────────────────────────────────────────
 const SOUND_KEY = 'galaxy-flight-sound'
+const STATION_KEY = 'galaxy-radio-station'
 let soundWanted = true
+let stationWanted = 'lofi'
 try {
   soundWanted = localStorage.getItem(SOUND_KEY) !== 'off'
+  stationWanted = localStorage.getItem(STATION_KEY) || stationWanted
 } catch {}
-const hum = createHum()
+const radio = createRadio()
+radio.setStationId(stationWanted)
+
+/** Remember where the dial is, and show it on the flight bar. */
+function showStation(station) {
+  stationWanted = station.id
+  ui.setRadio({ on: radio.on, name: station.name, tag: station.tag })
+  try {
+    localStorage.setItem(STATION_KEY, station.id)
+  } catch {}
+}
 const flyer = createFlyer(stage, web, {
   onChange(on) {
     ui.setFlight(on)
     ui.setNav(on)
     applyTouch()
     if (on) {
-      if (soundWanted) hum.start()
-      ui.setSound(soundWanted && hum.on)
+      if (soundWanted) radio.start()
+      showStation(radio.station)
       ui.toast('You’re airborne — W to fly, Shift to power up, click a world to fly there')
     } else {
-      hum.stop()
+      radio.stop()
+      showStation(radio.station)
       flyHome()
     }
   },
@@ -341,15 +370,15 @@ const flyer = createFlyer(stage, web, {
     web.setSelected(null)
     ui.card.hidden = true
   },
-  onSpeed: (v) => hum.setSpeed(v),
-  onCharge: (seconds, strength) => hum.charge(seconds, strength),
-  onBoom: (strength) => hum.boom(strength),
+  onSpeed: (v) => radio.setSpeed(v),
+  onCharge: (seconds, strength) => radio.charge(seconds, strength),
+  onBoom: (strength) => radio.boom(strength),
   onFlash: (strength, color) => ui.flash(strength, color),
   onHeading: (name) => ui.toast(`Heading to ${name}`),
   onArrive: (name) => ui.toast(`Arrived at ${name}`),
   onLeash: () => ui.toast('Turning back toward your systems'),
 })
-if (import.meta.env?.DEV) Object.assign(window.__galaxy, { flyer, actions, ui })
+if (import.meta.env?.DEV) Object.assign(window.__galaxy, { flyer, actions, ui, radio })
 
 /** Pull back far enough to take in every system at once. */
 function flyHome() {
@@ -626,6 +655,15 @@ addEventListener('keydown', (e) => {
   if ((key === 'z' && (e.ctrlKey || e.metaKey)) || (key === 'u' && !e.ctrlKey && !e.metaKey && !e.altKey)) {
     e.preventDefault()
     return actions.undo()
+  }
+  // The radio dial: , and . flip stations, M mutes.
+  if (key === ',' || key === '.') {
+    e.preventDefault()
+    return actions.station(key === '.' ? 1 : -1)
+  }
+  if (key === 'm') {
+    e.preventDefault()
+    return actions.toggleSound()
   }
   if (flyer.active) {
     if (ui.capturing && e.key === 'Escape') return ui.closeCapture()

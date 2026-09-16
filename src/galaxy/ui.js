@@ -111,9 +111,16 @@ export function createUi(root, actions) {
     </div>
     <div class="g-flight" hidden>
       <div class="g-flight-near" aria-live="polite"></div>
-      <div class="g-flight-keys">drag to look · <kbd>W</kbd><kbd>S</kbd> fly · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>R</kbd><kbd>F</kbd> rise / sink · <kbd>Shift</kbd> power up · <kbd>E</kbd> land · <kbd>Q</kbd> next system · <kbd>Esc</kbd> stop</div>
+      <div class="g-flight-keys">drag to look · <kbd>W</kbd><kbd>S</kbd> fly · <kbd>A</kbd><kbd>D</kbd> turn · <kbd>R</kbd><kbd>F</kbd> rise / sink · <kbd>Shift</kbd> power up · <kbd>E</kbd> land · <kbd>Q</kbd> next system · <kbd>,</kbd><kbd>.</kbd> radio · <kbd>Esc</kbd> stop</div>
       <div class="g-flight-row">
-        <button class="g-chip g-flight-sound" data-act="toggleSound">Sound off</button>
+        <div class="g-radio">
+          <button class="g-radio-step" data-station="-1" aria-label="Previous station">‹</button>
+          <button class="g-radio-dial" data-act="toggleSound" title="Radio on or off (M)">
+            <span class="g-radio-name"></span>
+            <span class="g-radio-tag"></span>
+          </button>
+          <button class="g-radio-step" data-station="1" aria-label="Next station">›</button>
+        </div>
         <button class="g-chip" data-act="toggleFlight">Stop flying</button>
       </div>
     </div>
@@ -152,6 +159,8 @@ export function createUi(root, actions) {
     if (act) actions[act.dataset.act]?.()
     const item = e.target.closest('[data-thought]')
     if (item) actions.selectThought(item.dataset.thought)
+    const dial = e.target.closest('[data-station]')
+    if (dial) actions.station(Number(dial.dataset.station))
     const seg = e.target.closest('.g-seg button')
     if (seg) actions.setSetting(seg.parentElement.dataset.setting, seg.dataset.value)
   })
@@ -250,9 +259,12 @@ export function createUi(root, actions) {
       : `<kbd>E</kbd> land beside <b>${esc(thought.thread.title)}</b>`
   }
 
-  function setSound(on) {
-    $('.g-flight-sound').textContent = on ? 'Sound on' : 'Sound off'
-    $('.g-flight-sound').classList.toggle('on', on)
+  /** The dial: which station is playing, or that the radio is off. */
+  function setRadio({ on, name, tag }) {
+    const dial = $('.g-radio-dial')
+    dial.classList.toggle('on', on)
+    $('.g-radio-name').textContent = on ? name : 'Radio off'
+    $('.g-radio-tag').textContent = on ? tag : 'M or click to play'
   }
 
   // ── flying: touch controls ─────────────────────────────────────────────────────────
@@ -698,7 +710,7 @@ export function createUi(root, actions) {
 
   return {
     setFilter, setMeter, syncLabels, placeLabels, showTooltip, fillCard, placeCard, dockCard, fillPanel, flash, toast, frame, card, panel,
-    openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus, setFlight, setFlightNear, setSound,
+    openCapture, closeCapture, setWritable, setSettings, toggleSettings, setHistory, setFocus, setFlight, setFlightNear, setRadio,
     setTouch, drawRadar, placeBeacons, setNav,
     get capturing() {
       return !captureForm.hidden
